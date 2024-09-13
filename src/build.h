@@ -24,6 +24,7 @@
 #include "depfile_parser.h"
 #include "exit_status.h"
 #include "graph.h"
+#include "jobserver.h"
 #include "util.h"  // int64_t
 
 struct BuildLog;
@@ -165,14 +166,15 @@ struct CommandRunner {
   virtual std::vector<Edge*> GetActiveEdges() { return std::vector<Edge*>(); }
   virtual void Abort() {}
 
-  /// Creates the RealCommandRunner
-  static CommandRunner* factory(const BuildConfig& config);
+  /// Creates the RealCommandRunner. \arg jobserver can be nullptr if there
+  /// is no jobserver pool to use.
+  static CommandRunner* factory(const BuildConfig& config,
+                                Jobserver::Client* jobserver);
 };
 
 /// Options (e.g. verbosity, parallelism) passed to a build.
 struct BuildConfig {
-  BuildConfig() : verbosity(NORMAL), dry_run(false), parallelism(1),
-                  failures_allowed(1), max_load_average(-0.0f) {}
+  BuildConfig() = default;
 
   enum Verbosity {
     QUIET,  // No output -- used when testing.
@@ -180,13 +182,14 @@ struct BuildConfig {
     NORMAL,  // regular output and status update
     VERBOSE
   };
-  Verbosity verbosity;
-  bool dry_run;
-  int parallelism;
-  int failures_allowed;
+  Verbosity verbosity = NORMAL;
+  bool dry_run = false;
+  int parallelism = 1;
+  bool disable_jobserver_client = false;
+  int failures_allowed = 1;
   /// The maximum load average we must not exceed. A negative value
   /// means that we do not have any limit.
-  double max_load_average;
+  double max_load_average = -0.0f;
   DepfileParserOptions depfile_parser_options;
 };
 
@@ -196,6 +199,12 @@ struct Builder {
           DepsLog* deps_log, DiskInterface* disk_interface, Status* status,
           int64_t start_time_millis);
   ~Builder();
+
+  /// Set Jobserver client instance for this builder.
+  void SetJobserverClient(Jobserver::Client* jobserver_client) {
+    jobserver_ = jobserver_client;
+    ;
+  }
 
   /// Clean up after interrupted commands by deleting output files.
   void Cleanup();
@@ -230,6 +239,7 @@ struct Builder {
   State* state_;
   const BuildConfig& config_;
   Plan plan_;
+  Jobserver::Client* jobserver_ = nullptr;
   std::unique_ptr<CommandRunner> command_runner_;
   Status* status_;
 

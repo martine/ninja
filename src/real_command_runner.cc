@@ -13,18 +13,30 @@
 // limitations under the License.
 
 #include "build.h"
+#include "jobserver.h"
 #include "subprocess.h"
 
 struct RealCommandRunner : public CommandRunner {
-  explicit RealCommandRunner(const BuildConfig& config) : config_(config) {}
+  explicit RealCommandRunner(const BuildConfig& config,
+                             Jobserver::Client* jobserver)
+      : config_(config), jobserver_(jobserver) {}
   size_t CanRunMore() const override;
   bool StartCommand(Edge* edge) override;
   bool WaitForCommand(Result* result) override;
   std::vector<Edge*> GetActiveEdges() override;
   void Abort() override;
 
+  void ClearJobTokens() {
+    if (jobserver_) {
+      for (Edge* edge : GetActiveEdges()) {
+        jobserver_->Release(std::move(edge->job_slot_));
+      }
+    }
+  }
+
   const BuildConfig& config_;
   SubprocessSet subprocs_;
+  Jobserver::Client* jobserver_ = nullptr;
   std::map<const Subprocess*, Edge*> subproc_to_edge_;
 };
 
@@ -38,6 +50,7 @@ std::vector<Edge*> RealCommandRunner::GetActiveEdges() {
 }
 
 void RealCommandRunner::Abort() {
+  ClearJobTokens();
   subprocs_.Clear();
 }
 
@@ -93,6 +106,7 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
   return true;
 }
 
-CommandRunner* CommandRunner::factory(const BuildConfig& config) {
-  return new RealCommandRunner(config);
+CommandRunner* CommandRunner::factory(const BuildConfig& config,
+                                      Jobserver::Client* jobserver) {
+  return new RealCommandRunner(config, jobserver);
 }

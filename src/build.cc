@@ -36,6 +36,7 @@
 #include "disk_interface.h"
 #include "explanations.h"
 #include "graph.h"
+#include "jobserver.h"
 #include "metrics.h"
 #include "state.h"
 #include "status.h"
@@ -163,6 +164,15 @@ Edge* Plan::FindWork() {
     return NULL;
 
   Edge* work = ready_.top();
+
+  // If jobserver mode is enabled, try to acquire a token first,
+  // and return null in case of failure.
+  if (builder_ && builder_->jobserver_) {
+    work->job_slot_ = builder_->jobserver_->TryAcquire();
+    if (!work->job_slot_.IsValid())
+      return nullptr;
+  }
+
   ready_.pop();
   return work;
 }
@@ -198,6 +208,10 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
   if (directly_wanted)
     edge->pool()->EdgeFinished(*edge);
   edge->pool()->RetrieveReadyEdges(&ready_);
+
+  // Release job slot if needed.
+  if (builder_ && builder_->jobserver_)
+    builder_->jobserver_->Release(std::move(edge->job_slot_));
 
   // The rest of this function only applies to successful commands.
   if (result != kEdgeSucceeded)
@@ -699,7 +713,8 @@ bool Builder::Build(string* err) {
     if (config_.dry_run)
       command_runner_.reset(new DryRunCommandRunner);
     else
-      command_runner_.reset(CommandRunner::factory(config_));
+      command_runner_.reset(CommandRunner::factory(config_, jobserver_));
+    ;
   }
 
   // We are about to start the build process.
