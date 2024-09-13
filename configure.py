@@ -561,6 +561,7 @@ for name in ['build',
 if platform.is_windows():
     for name in ['subprocess-win32',
                  'includes_normalize-win32',
+                 'jobserver-win32',
                  'msvc_helper-win32',
                  'msvc_helper_main-win32']:
         objs += cxx(name, variables=cxxvariables)
@@ -568,7 +569,9 @@ if platform.is_windows():
         objs += cxx('minidump-win32', variables=cxxvariables)
     objs += cc('getopt')
 else:
-    objs += cxx('subprocess-posix')
+    for name in ['jobserver-posix',
+                 'subprocess-posix']:
+        objs += cxx(name, variables=cxxvariables)
 if platform.is_aix():
     objs += cc('getopt')
 if platform.is_msvc():

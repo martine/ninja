@@ -149,6 +149,10 @@ struct Jobserver {
     /// extracted from MAKEFLAGS.
     int read_fd = -1;
     int write_fd = -1;
+
+    /// Return true if this instance matches an active implementation mode.
+    /// This does not try to validate configuration parameters though.
+    bool HasMode() { return mode != kModeNone; }
   };
 
   /// Parse the value of a MAKEFLAGS environment variable. On success return
@@ -164,4 +168,51 @@ struct Jobserver {
   /// while --jobserver-auth=NAME only work on Windows.
   static bool ParseNativeMakeFlagsValue(const char* makeflags_env,
                                         Config* config, std::string* error);
+
+  /// A Jobserver::Client instance models a client of an external GNU jobserver
+  /// pool, which can be implemented as a Unix FIFO, or a Windows named semaphore.
+  /// Usage is the following:
+  ///
+  ///  - Call Jobserver::Client::Create(), passing a Config value as argument,
+  ///    (e.g. one initialized with ParseNativeMakeFlagsValue()) to create
+  ///    a new instance.
+  ///
+  ///  - Call TryAcquire() to try to acquire a job slot from the pool.
+  ///    If the result is not an invalid slot, store it until the
+  ///    corresponding command completes, then call Release() to send it
+  ///    back to the pool.
+  ///
+  ///  - It is important that all acquired slots are released to the pool,
+  ///    even if Ninja terminates early (e.g. due to a build command failing).
+  ///
+  class Client {
+   public:
+    /// Destructor.
+    virtual ~Client() {}
+
+    /// Try to acquire a slot from the pool. On failure, i.e. if no slot
+    /// can be acquired, this returns an invalid Token instance.
+    ///
+    /// Note that this will always return the implicit slot value the first
+    /// time this is called, without reading anything from the pool, as
+    /// specified by the protocol. This implicit value *must* be released
+    /// just like any other one. In general, users of this class should not
+    /// care about this detail, except unit-tests.
+    virtual Slot TryAcquire() { return Slot(); }
+
+    /// Release a slot to the pool. Does nothing if slot is invalid,
+    /// or if writing to the pool fails (and if this is not the implicit slot).
+    /// If the pool is destroyed before Ninja, then only the implicit slot
+    /// can be acquired in the next calls (if it was released). This simply
+    /// enforces serialization of all commands, instead of blocking.
+    virtual void Release(Slot slot) {}
+
+    /// Create a new Client instance from a given configuration. On failure,
+    /// this returns null after setting |*error|. Note that it is an error to
+    /// call this function with |config.HasMode() == false|.
+    static std::unique_ptr<Client> Create(const Config&, std::string* error);
+
+   protected:
+    Client() = default;
+  };
 };
