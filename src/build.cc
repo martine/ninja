@@ -696,10 +696,13 @@ bool Builder::Build(string* err) {
 
   // Set up the command runner if we haven't done so already.
   if (!command_runner_.get()) {
-    if (config_.dry_run)
+    if (config_.dry_run) {
       command_runner_.reset(new DryRunCommandRunner);
-    else
-      command_runner_.reset(CommandRunner::factory(config_));
+    } else {
+      command_runner_.reset(CommandRunner::factory(config_, [this]() {
+        status_->Refresh(GetTimeMillis() - start_time_millis_);
+      }));
+    }
   }
 
   // We are about to start the build process.

@@ -16,6 +16,7 @@ import typing as T
 
 default_env = dict(os.environ)
 default_env.pop('NINJA_STATUS', None)
+default_env.pop('NINJA_STATUS_REFRESH_MILLIS', None)
 default_env.pop('CLICOLOR_FORCE', None)
 default_env['TERM'] = ''
 NINJA_PATH = os.path.abspath('./ninja')
@@ -309,6 +310,41 @@ build zoo: touch bar
         'Do we suppress the status information when --quiet is specified?'
         output = run(Output.BUILD_SIMPLE_ECHO, flags='--quiet')
         self.assertEqual(output, 'do thing\n')
+
+    @unittest.skip("Time-based test fails on Github CI")
+    def test_ninja_status_periodic_update(self) -> None:
+        b =  BuildDir('''\
+           rule sleep_then_print
+             command = sleep 2 && echo done
+             description = sleep2s
+
+           build all: sleep_then_print
+           ''')
+        with b:
+          env = default_env.copy()
+          env["NINJA_STATUS"] = "[%w] "
+          self.assertListEqual(
+            b.run('all', raw_output=True, env=env).replace("\r\n", "<CRLF>").split("\r"),
+            [
+              "",
+              "[00:00] sleep2s\x1b[K",
+              "[00:01] sleep2s\x1b[K",
+              "[00:02] sleep2s\x1b[K",
+              "[00:02] sleep2s\x1b[K<CRLF>done<CRLF>",
+            ])
+
+          env["NINJA_STATUS_REFRESH_MILLIS"] = "500"
+          self.assertListEqual(
+            b.run('all', raw_output=True, env=env).replace("\r\n", "<CRLF>").split("\r"),
+            [
+              "",
+              "[00:00] sleep2s\x1b[K",
+              "[00:00] sleep2s\x1b[K",
+              "[00:01] sleep2s\x1b[K",
+              "[00:01] sleep2s\x1b[K",
+              "[00:02] sleep2s\x1b[K",
+              "[00:02] sleep2s\x1b[K<CRLF>done<CRLF>",
+            ])
 
     def test_entering_directory_on_stdout(self) -> None:
         output = run(Output.BUILD_SIMPLE_ECHO, flags='-C$PWD', pipe=True)

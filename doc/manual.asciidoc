@@ -190,7 +190,8 @@ you don't need to pass `-j`.)
 Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
-Ninja supports one environment variable to control its behavior:
+Ninja supports a few environment variables to control its behavior:
+
 `NINJA_STATUS`, the progress status printed before the rule being run.
 
 Several placeholders are available:
@@ -214,6 +215,12 @@ specified by `-j` or its default)
 The default progress status is `"[%f/%t] "` (note the trailing space
 to separate from the build rule). Another example of possible progress status
 could be `"[%u/%r/%f] "`.
+
+`NINJA_STATUS_REFRESH_MILLIS`, the refresh timeout in milliseconds
+for status updates in interactive terminals. The default value is 1000,
+to allow time-sensitive formatters like `%w` to be updated during
+long build runs (e.g. when one or more build commands run for a long
+time).
 
 Extra tools
 ~~~~~~~~~~~

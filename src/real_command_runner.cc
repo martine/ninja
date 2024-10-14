@@ -16,7 +16,9 @@
 #include "subprocess.h"
 
 struct RealCommandRunner : public CommandRunner {
-  explicit RealCommandRunner(const BuildConfig& config) : config_(config) {}
+  explicit RealCommandRunner(const BuildConfig& config,
+                             StatusRefresher&& refresh_status)
+      : config_(config), refresh_status_(std::move(refresh_status)) {}
   size_t CanRunMore() const override;
   bool StartCommand(Edge* edge) override;
   bool WaitForCommand(Result* result) override;
@@ -24,6 +26,7 @@ struct RealCommandRunner : public CommandRunner {
   void Abort() override;
 
   const BuildConfig& config_;
+  StatusRefresher refresh_status_;
   SubprocessSet subprocs_;
   std::map<const Subprocess*, Edge*> subproc_to_edge_;
 };
@@ -75,9 +78,14 @@ bool RealCommandRunner::StartCommand(Edge* edge) {
 
 bool RealCommandRunner::WaitForCommand(Result* result) {
   Subprocess* subproc;
-  while ((subproc = subprocs_.NextFinished()) == NULL) {
-    bool interrupted = subprocs_.DoWork();
-    if (interrupted)
+  while ((subproc = subprocs_.NextFinished()) == nullptr) {
+    SubprocessSet::WorkResult ret =
+        subprocs_.DoWork(config_.status_refresh_millis);
+    if (ret == SubprocessSet::WorkResult::TIMEOUT) {
+      refresh_status_();
+      continue;
+    }
+    if (ret == SubprocessSet::WorkResult::INTERRUPTION)
       return false;
   }
 
@@ -93,6 +101,7 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
   return true;
 }
 
-CommandRunner* CommandRunner::factory(const BuildConfig& config) {
-  return new RealCommandRunner(config);
+CommandRunner* CommandRunner::factory(const BuildConfig& config,
+                                      StatusRefresher&& refresh_status) {
+  return new RealCommandRunner(config, std::move(refresh_status));
 }
