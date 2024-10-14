@@ -252,19 +252,29 @@ Subprocess *SubprocessSet::Add(const string& command, bool use_console) {
 }
 
 bool SubprocessSet::DoWork() {
+  WorkResult ret = DoWork(-1);
+  return ret == WorkResult::INTERRUPTION;
+}
+
+SubprocessSet::WorkResult SubprocessSet::DoWork(int64_t timeout_millis) {
   DWORD bytes_read;
   Subprocess* subproc;
   OVERLAPPED* overlapped;
+  DWORD timeout =
+      (timeout_millis < 0) ? INFINITE : static_cast<DWORD>(timeout_millis);
 
   if (!GetQueuedCompletionStatus(ioport_, &bytes_read, (PULONG_PTR)&subproc,
-                                 &overlapped, INFINITE)) {
+                                 &overlapped, timeout)) {
+    if (!overlapped) {
+      return WorkResult::TIMEOUT;
+    }
     if (GetLastError() != ERROR_BROKEN_PIPE)
       Win32Fatal("GetQueuedCompletionStatus");
   }
 
   if (!subproc) // A NULL subproc indicates that we were interrupted and is
                 // delivered by NotifyInterrupted above.
-    return true;
+    return WorkResult::INTERRUPTION;
 
   subproc->OnPipeReady();
 
@@ -277,7 +287,7 @@ bool SubprocessSet::DoWork() {
     }
   }
 
-  return false;
+  return WorkResult::COMPLETION;
 }
 
 Subprocess* SubprocessSet::NextFinished() {
