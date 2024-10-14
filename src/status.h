@@ -34,6 +34,13 @@ struct Status {
   virtual void BuildStarted() = 0;
   virtual void BuildFinished() = 0;
 
+  /// Refresh status display after some time has passed.  Useful
+  /// when printing the status on an interactive terminal. Does
+  /// nothing by default. \arg cur_time_millis is the current time
+  /// expressed in milliseconds, using the same epoch than the
+  /// one used in BuildEdgeStart() and BuildEdgeFinished().
+  virtual void Refresh(int64_t cur_time_millis) {}
+
   /// Set the Explanations instance to use to report explanations,
   /// argument can be nullptr if no explanations need to be printed
   /// (which is the default).
