@@ -30,12 +30,32 @@ TEST(Lexer, ReadVarValue) {
 }
 
 TEST(Lexer, ReadEvalStringEscapes) {
-  Lexer lexer("$ $$ab c$: $\ncde\n");
+  Lexer lexer("$ $$ab c$: $\ncd\r$|e\n");
   EvalString eval;
   string err;
   EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
   EXPECT_EQ("", err);
-  EXPECT_EQ("[ $ab c: cde]",
+  EXPECT_EQ("[ $ab c: cd\r\ne]",
+            eval.Serialize());
+}
+
+TEST(Lexer, WindowsNewline) {
+  Lexer lexer("foo\r\n");
+  EvalString eval;
+  string err;
+  EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
+  EXPECT_EQ("", err);
+  EXPECT_EQ("[foo]",
+            eval.Serialize());
+}
+
+TEST(Lexer, EndsInCarriageReturn) {
+  Lexer lexer("foo\r\r\n");
+  EvalString eval;
+  string err;
+  EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
+  EXPECT_EQ("", err);
+  EXPECT_EQ("[foo\r]",
             eval.Serialize());
 }
 

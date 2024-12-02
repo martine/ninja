@@ -217,18 +217,20 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
       eval->AddText(StringPiece(start, p - start));
       continue;
     }
-    "\r\n" {
+    "\r\n"|"\n" {
       if (path)
         p = start;
       break;
     }
-    [ :|\n] {
+    "\r" {
+      eval->AddText(StringPiece(start, 1));
+      continue;
+    }
+    [ :|] {
       if (path) {
         p = start;
         break;
       } else {
-        if (*start == '\n')
-          break;
         eval->AddText(StringPiece(start, 1));
         continue;
       }
@@ -257,6 +259,10 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
     }
     "$:" {
       eval->AddText(StringPiece(":", 1));
+      continue;
+    }
+    "$|" {
+      eval->AddText(StringPiece("\n", 1));
       continue;
     }
     "$". {

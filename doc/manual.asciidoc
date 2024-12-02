@@ -862,7 +862,11 @@ Comments begin with `#` and extend to the end of the line.
 
 Newlines are significant.  Statements like `build foo bar` are a set
 of space-separated tokens that end at the newline.  Newlines and
-spaces within a token must be escaped.
+spaces within a token must be escaped. Ninja will consider either
+\n or \r\n to be a newline. \r on its own is not a newline, and
+can be used inside variable values. Note that if you want a \r
+as the last byte in a variable value, the variable assignment must
+end in \r\r\n so the \r is not mistaken to be a part of the newline.
 
 There is only one escape character, `$`, and it has the following
 behaviors:
@@ -870,15 +874,20 @@ behaviors:
 `$` followed by a newline:: escape the newline (continue the current line
 across a line break).
 
-`$` followed by text:: a variable reference.
+`$` followed by text:: a variable reference. The text can be
+uppercase/lowercase letters, numbers, underscores, and dashes.
 
-`${varname}`:: alternate syntax for `$varname`.
+`${varname}`:: alternate syntax for `$varname`, with the addition of
+allowing periods in the variable name.
 
 `$` followed by space:: a space.  (This is only necessary in lists of
 paths, where a space would otherwise separate filenames.  See below.)
 
 `$:` :: a colon.  (This is only necessary in `build` lines, where a colon
 would otherwise terminate the list of outputs.)
+
+`$|`:: a newline.  (This becomes a literal newline in the variable
+assignment.)
 
 `$$`:: a literal `$`.
 
