@@ -88,6 +88,9 @@ struct Cleaner {
   /// Remove the depfile and rspfile for an Edge.
   void RemoveEdgeFiles(Edge* edge);
 
+  /// Perform actual file removal
+  void RemoveAllPending();
+
   /// Helper recursive method for CleanTarget().
   void DoCleanTarget(Node* target);
   void PrintHeader();
@@ -103,6 +106,7 @@ struct Cleaner {
   DyndepLoader dyndep_loader_;
   std::set<std::string> removed_;
   std::set<Node*> cleaned_;
+  std::vector<std::string> pending_;
   int cleaned_files_count_;
   DiskInterface* disk_interface_;
   int status_;
