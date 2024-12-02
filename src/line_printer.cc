@@ -38,8 +38,10 @@ LinePrinter::LinePrinter() : have_blank_line_(true), console_locked_(false) {
 #ifndef _WIN32
   smart_terminal_ = isatty(1) && term && string(term) != "dumb";
 #else
-  if (term && string(term) == "dumb") {
-    smart_terminal_ = false;
+  if (term) {
+    // Assume we are in a terminal emulator.
+    smart_terminal_ = string(term) != "dumb";
+    console_ = INVALID_HANDLE_VALUE;
   } else {
     console_ = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO csbi;
@@ -48,6 +50,10 @@ LinePrinter::LinePrinter() : have_blank_line_(true), console_locked_(false) {
 #endif
   supports_color_ = smart_terminal_;
 #ifdef _WIN32
+  // On Windows it is not possible to distinguish a terminal emulator
+  // from a pipe and ANSI escape sequences break applications that
+  // parse ninja's output (cmake, for instance):
+  supports_color_ = supports_color_ && console_ != INVALID_HANDLE_VALUE;
   // Try enabling ANSI escape sequence support on Windows 10 terminals.
   if (supports_color_) {
     DWORD mode;
@@ -79,6 +85,14 @@ void LinePrinter::Print(string to_print, LineType type) {
 
   if (smart_terminal_ && type == ELIDE) {
 #ifdef _WIN32
+    if (console_ == INVALID_HANDLE_VALUE) {
+      // Assume we are in a terminal emulator.
+      to_print = ElideMiddle(to_print, 80);
+      printf("%s", to_print.c_str());
+      fflush(stdout);
+      return;
+    }
+
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(console_, &csbi);
 
