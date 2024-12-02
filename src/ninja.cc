@@ -386,7 +386,7 @@ int NinjaMain::ToolGraph(const Options* options, int argc, char* argv[]) {
     return 1;
   }
 
-  GraphViz graph(&state_, &disk_interface_);
+  GraphViz graph(&state_, &deps_log_, &disk_interface_, &config_.depfile_parser_options);
   graph.Start();
   for (vector<Node*>::const_iterator n = nodes.begin(); n != nodes.end(); ++n)
     graph.AddTarget(*n);

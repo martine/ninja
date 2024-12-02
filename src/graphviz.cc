@@ -50,6 +50,15 @@ void GraphViz::AddTarget(Node* node) {
     }
   }
 
+  {
+    // Load discovered deps.
+    std::string err;
+    if (!dep_loader_.LoadDeps(edge, &err)) {
+      if (!err.empty())
+        Warning("%s\n", err.c_str());
+    }
+  }
+
   if (edge->inputs_.size() == 1 && edge->outputs_.size() == 1) {
     // Can draw simply.
     // Note extra space before label text -- this is cosmetic and feels
