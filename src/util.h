@@ -122,6 +122,12 @@ bool Truncate(const std::string& path, size_t size, std::string* err);
 /// Convert the value returned by GetLastError() into a string.
 std::string GetLastErrorString();
 
+/// Convert UTF-8 path string to Win32 native path.
+std::wstring UTF8ToWin32Unicode(const std::string& path);
+
+/// Convert Win32 native path to UTF-8 path string.
+std::string Win32UnicodeToUTF8(const std::wstring& path);
+
 /// Calls Fatal() with a function name and GetLastErrorString.
 NORETURN void Win32Fatal(const char* function, const char* hint = NULL);
 #endif

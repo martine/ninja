@@ -46,7 +46,7 @@ int CLWrapper::Run(const string& command, string* output) {
 
   // Must be inheritable so subprocesses can dup to children.
   HANDLE nul =
-      CreateFileA("NUL", GENERIC_READ,
+      CreateFileW(L"NUL", GENERIC_READ,
                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                   &security_attributes, OPEN_EXISTING, 0, NULL);
   if (nul == INVALID_HANDLE_VALUE)
@@ -60,16 +60,20 @@ int CLWrapper::Run(const string& command, string* output) {
     Win32Fatal("SetHandleInformation");
 
   PROCESS_INFORMATION process_info = {};
-  STARTUPINFOA startup_info = {};
-  startup_info.cb = sizeof(STARTUPINFOA);
+  STARTUPINFOW startup_info = {};
+  startup_info.cb = sizeof(STARTUPINFOW);
   startup_info.hStdInput = nul;
   startup_info.hStdError = ::GetStdHandle(STD_ERROR_HANDLE);
   startup_info.hStdOutput = stdout_write;
   startup_info.dwFlags |= STARTF_USESTDHANDLES;
 
-  if (!CreateProcessA(NULL, (char*)command.c_str(), NULL, NULL,
-                      /* inherit handles */ TRUE, 0,
-                      env_block_, NULL,
+  // NOTE: CreateProcessW() modifies the input command string.
+  // env_block_ contains an ANSI environment block, so
+  // CREATE_UNICODE_ENVIRONMENT is _not_ used here in dwCreationFlags.
+  std::wstring command_wide = UTF8ToWin32Unicode(command);
+  if (!CreateProcessW(NULL, const_cast<wchar_t*>(command_wide.data()), NULL,
+                      NULL,
+                      /* inherit handles */ TRUE, 0, env_block_, NULL,
                       &startup_info, &process_info)) {
     Win32Fatal("CreateProcess");
   }

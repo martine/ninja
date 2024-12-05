@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifdef _MSC_VER
+#ifdef _WIN32
 
 #include <windows.h>
-#include <DbgHelp.h>
+
+// Must appear after <windows.h>
+#include <dbghelp.h>
 
 #include "util.h"
 
@@ -33,18 +35,18 @@ typedef BOOL (WINAPI *MiniDumpWriteDumpFunc) (
 
 /// Creates a windows minidump in temp folder.
 void CreateWin32MiniDump(_EXCEPTION_POINTERS* pep) {
-  char temp_path[MAX_PATH];
-  GetTempPathA(sizeof(temp_path), temp_path);
-  char temp_file[MAX_PATH];
-  sprintf(temp_file, "%s\\ninja_crash_dump_%lu.dmp",
-          temp_path, GetCurrentProcessId());
+  wchar_t temp_path[MAX_PATH];
+  GetTempPathW(sizeof(temp_path) / sizeof(temp_path[0]), temp_path);
+  wchar_t temp_file[MAX_PATH];
+  _snwprintf(temp_file, MAX_PATH, L"%s\\ninja_crash_dump_%lu.dmp", temp_path,
+             GetCurrentProcessId());
 
   // Delete any previous minidump of the same name.
-  DeleteFileA(temp_file);
+  DeleteFileW(temp_file);
 
   // Load DbgHelp.dll dynamically, as library is not present on all
   // Windows versions.
-  HMODULE dbghelp = LoadLibraryA("dbghelp.dll");
+  HMODULE dbghelp = LoadLibraryW(L"dbghelp.dll");
   if (dbghelp == NULL) {
     Error("failed to create minidump: LoadLibrary('dbghelp.dll'): %s",
           GetLastErrorString().c_str());
@@ -59,11 +61,11 @@ void CreateWin32MiniDump(_EXCEPTION_POINTERS* pep) {
     return;
   }
 
-  HANDLE hFile = CreateFileA(temp_file, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+  HANDLE hFile = CreateFileW(temp_file, GENERIC_READ | GENERIC_WRITE, 0, NULL,
                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   if (hFile == NULL) {
-    Error("failed to create minidump: CreateFileA(%s): %s",
-          temp_file, GetLastErrorString().c_str());
+    Error("failed to create minidump: CreateFileW(%s): %s",
+          Win32UnicodeToUTF8(temp_file).c_str(), GetLastErrorString().c_str());
     return;
   }
 
@@ -86,4 +88,4 @@ void CreateWin32MiniDump(_EXCEPTION_POINTERS* pep) {
   Warning("minidump created: %s", temp_file);
 }
 
-#endif  // _MSC_VER
+#endif  // _WIN32

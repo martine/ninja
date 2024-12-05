@@ -416,8 +416,10 @@ int ReadFile(const string& path, string* contents, string* err) {
   // This makes a ninja run on a set of 1500 manifest files about 4% faster
   // than using the generic fopen code below.
   err->clear();
-  HANDLE f = ::CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
-                           OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+  std::wstring native_path = UTF8ToWin32Unicode(path);
+  HANDLE f =
+      ::CreateFileW(native_path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL,
+                    OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
   if (f == INVALID_HANDLE_VALUE) {
     err->assign(GetLastErrorString());
     return -ENOENT;
@@ -950,3 +952,38 @@ bool Truncate(const string& path, size_t size, string* err) {
   }
   return true;
 }
+
+#ifdef _WIN32
+std::wstring UTF8ToWin32Unicode(const std::string& path) {
+  std::wstring result;
+  if (!path.empty()) {
+    int path_len_int = static_cast<int>(path.size());
+    int len =
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), path_len_int, nullptr, 0);
+    if (len <= 0)
+      Win32Fatal("Invalid file path", path.c_str());
+
+    result.resize(static_cast<size_t>(len));
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), path_len_int,
+                        const_cast<wchar_t*>(result.data()), len);
+  }
+  return result;
+}
+
+std::string Win32UnicodeToUTF8(const std::wstring& path) {
+  std::string result;
+  if (!path.empty()) {
+    int path_len_int = static_cast<int>(path.size());
+    int len = WideCharToMultiByte(CP_UTF8, 0, path.c_str(), path_len_int,
+                                  nullptr, 0, nullptr, nullptr);
+    if (len <= 0)
+      Win32Fatal("Invalid native file path");
+
+    result.resize(static_cast<size_t>(len));
+    (void)WideCharToMultiByte(CP_UTF8, 0, path.c_str(), path_len_int,
+                              const_cast<char*>(result.data()), len, nullptr,
+                              nullptr);
+  }
+  return result;
+}
+#endif  // _WIN32

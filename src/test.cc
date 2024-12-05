@@ -26,6 +26,7 @@
 #include <windows.h>
 #include <io.h>
 #else
+#include <stdio.h>
 #include <unistd.h>
 #endif
 
@@ -79,6 +80,43 @@ string GetSystemTempDir() {
   return "/tmp";
 #endif
 }
+
+#ifdef _WIN32
+
+/// An implementation of fmemopen() that writes the content of the buffer
+/// to a temporary file then returns an open handle to it. The file itself
+/// is deleted on fclose().
+FILE* fmemopen(void* buf, size_t size, const char* mode) {
+  std::string template_path = GetSystemTempDir() + "/VirtualFileSystem.XXXXXX";
+  int err = _mktemp_s(const_cast<char*>(template_path.data()),
+                      template_path.size() + 1);
+  if (err < 0) {
+    perror("_mktemp_s");
+    return nullptr;
+  }
+  std::wstring wide_path = UTF8ToWin32Unicode(template_path);
+  HANDLE handle =
+      CreateFileW(wide_path.c_str(), DELETE | GENERIC_READ | GENERIC_WRITE, 0,
+                  nullptr, CREATE_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    errno = EINVAL;
+    return nullptr;
+  }
+  FILE* fp = _fdopen(_open_osfhandle((intptr_t)handle, 0), "w+b");
+  if (!fp) {
+    ::CloseHandle(handle);
+    return nullptr;
+  }
+  if (buf && size && fwrite(buf, size, 1, fp) != 1) {
+    fclose(fp);
+    return nullptr;
+  }
+  rewind(fp);
+  return fp;
+}
+
+#endif  // _WIN32
 
 }  // anonymous namespace
 
@@ -193,6 +231,26 @@ int VirtualFileSystem::RemoveFile(const string& path) {
   } else {
     return 1;
   }
+}
+
+FILE* VirtualFileSystem::OpenFile(const std::string& path, const char* mode) {
+  auto it = files_.find(path);
+  if (it == files_.end()) {
+    errno = ENOENT;
+    return nullptr;
+  }
+  // This implementation only supports reading.
+  for (auto ch : StringPiece(mode)) {
+    if (ch == 'w' || ch == 'a') {
+      assert(false &&
+             "VirtualFileSystem::OpenFile() does not support write or append "
+             "mode");
+      errno = EINVAL;
+      return nullptr;
+    }
+  }
+  const std::string& data = it->second.contents;
+  return fmemopen(const_cast<char*>(data.data()), data.size(), mode);
 }
 
 void ScopedTempDir::CreateAndEnter(const string& name) {

@@ -88,7 +88,8 @@ struct MissingDependencyScannerTest : public testing::Test {
   MissingDependencyTestDelegate delegate_;
   Rule generator_rule_;
   Rule compile_rule_;
-  DepsLog deps_log_;
+  SystemDiskInterface disk_interface_;
+  DepsLog deps_log_{ disk_interface_ };
   State state_;
   VirtualFileSystem filesystem_;
   MissingDependencyScanner scanner_;

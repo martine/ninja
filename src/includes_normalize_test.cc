@@ -109,10 +109,8 @@ TEST(IncludesNormalize, LongInvalidPath) {
   // Too long, won't be canonicalized. Ensure doesn't crash.
   string result, err;
   IncludesNormalize normalizer(".");
-  EXPECT_FALSE(
-      normalizer.Normalize(kLongInputString, &result, &err));
-  EXPECT_EQ("path too long", err);
-
+  EXPECT_TRUE(normalizer.Normalize(kLongInputString, &result, &err));
+  EXPECT_EQ("", err);
 
   // Construct max size path having cwd prefix.
   // kExactlyMaxPath = "$cwd\\a\\aaaa...aaaa\0";
@@ -153,17 +151,18 @@ TEST(IncludesNormalize, ShortRelativeButTooLongAbsolutePath) {
 
   // Construct max size path having cwd prefix.
   // kExactlyMaxPath = "aaaa\\aaaa...aaaa\0";
-  char kExactlyMaxPath[_MAX_PATH + 1];
-  for (int i = 0; i < _MAX_PATH; ++i) {
-    if (i < _MAX_PATH - 1 && i % 10 == 4)
+  const size_t kMaxPathSize = _MAX_PATH * 2;
+  char kExactlyMaxPath[kMaxPathSize + 1];
+  for (int i = 0; i < kMaxPathSize; ++i) {
+    if (i < kMaxPathSize - 1 && i % 10 == 4)
       kExactlyMaxPath[i] = '\\';
     else
       kExactlyMaxPath[i] = 'a';
   }
-  kExactlyMaxPath[_MAX_PATH] = '\0';
-  EXPECT_EQ(strlen(kExactlyMaxPath), _MAX_PATH);
+  kExactlyMaxPath[kMaxPathSize] = '\0';
+  EXPECT_EQ(strlen(kExactlyMaxPath), kMaxPathSize);
 
-  // Make sure a path that's exactly _MAX_PATH long fails with a proper error.
-  EXPECT_FALSE(normalizer.Normalize(kExactlyMaxPath, &result, &err));
-  EXPECT_TRUE(err.find("GetFullPathName") != string::npos);
+  // Make sure a path that's larger than _MAX_PATH long does not fail.
+  EXPECT_TRUE(normalizer.Normalize(kExactlyMaxPath, &result, &err));
+  EXPECT_EQ("", err);
 }

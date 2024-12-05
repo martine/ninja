@@ -15,11 +15,13 @@
 #ifndef NINJA_DEPS_LOG_H_
 #define NINJA_DEPS_LOG_H_
 
+#include <stdio.h>
+
+#include <memory>
 #include <string>
 #include <vector>
 
-#include <stdio.h>
-
+#include "disk_interface.h"
 #include "load_status.h"
 #include "timestamp.h"
 
@@ -66,7 +68,13 @@ struct State;
 /// wins, allowing updates to just be appended to the file.  A separate
 /// repacking step can run occasionally to remove dead records.
 struct DepsLog {
-  DepsLog() : needs_recompaction_(false), file_(NULL) {}
+  /// No default constructor.
+  DepsLog() = delete;
+
+  /// Constructor takes a DiskInterface reference.
+  DepsLog(DiskInterface& disk_interface);
+
+  /// Destructor
   ~DepsLog();
 
   // Writing (build-time) interface.
@@ -115,8 +123,10 @@ struct DepsLog {
   /// be set.
   bool OpenForWriteIfNeeded();
 
-  bool needs_recompaction_;
-  FILE* file_;
+  DiskInterface* disk_interface_ = nullptr;
+
+  bool needs_recompaction_ = false;
+  FILE* file_ = nullptr;
   std::string file_path_;
 
   /// Maps id -> Node.

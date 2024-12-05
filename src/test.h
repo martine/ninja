@@ -48,7 +48,7 @@ void VerifyGraph(const State& state);
 /// An implementation of DiskInterface that uses an in-memory representation
 /// of disk state.  It also logs file accesses and directory creations
 /// so it can be used by tests to verify disk access patterns.
-struct VirtualFileSystem : public DiskInterface {
+struct VirtualFileSystem : public NullDiskInterface {
   VirtualFileSystem() : now_(1) {}
 
   /// "Create" a file with contents.
@@ -61,12 +61,16 @@ struct VirtualFileSystem : public DiskInterface {
   }
 
   // DiskInterface
-  virtual TimeStamp Stat(const std::string& path, std::string* err) const;
-  virtual bool WriteFile(const std::string& path, const std::string& contents);
-  virtual bool MakeDir(const std::string& path);
-  virtual Status ReadFile(const std::string& path, std::string* contents,
-                          std::string* err);
-  virtual int RemoveFile(const std::string& path);
+  TimeStamp Stat(const std::string& path, std::string* err) const override;
+  bool WriteFile(const std::string& path, const std::string& contents) override;
+  bool MakeDir(const std::string& path) override;
+  Status ReadFile(const std::string& path, std::string* contents,
+                  std::string* err) override;
+  int RemoveFile(const std::string& path) override;
+
+  // NOTE: This implementation does not support write or append mode!
+  // It will assert() in debug builds, and return NULL/EINVAL otherwise.
+  FILE* OpenFile(const std::string& path, const char* mode) override;
 
   /// An entry for a single in-memory file.
   struct Entry {

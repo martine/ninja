@@ -28,19 +28,23 @@ using namespace std;
 
 namespace {
 
-bool InternalGetFullPathName(const StringPiece& file_name, char* buffer,
-                             size_t buffer_length, string *err) {
-  DWORD result_size = GetFullPathNameA(file_name.AsString().c_str(),
-                                       buffer_length, buffer, NULL);
-  if (result_size == 0) {
-    *err = "GetFullPathNameA(" + file_name.AsString() + "): " +
-        GetLastErrorString();
-    return false;
-  } else if (result_size > buffer_length) {
-    *err = "path too long";
-    return false;
+std::wstring InternalGetFullPathName(StringPiece file_name, std::string* err) {
+  std::wstring result;
+  std::wstring wide_filename = UTF8ToWin32Unicode(file_name.AsString());
+  DWORD len = GetFullPathNameW(wide_filename.c_str(), 0, NULL, NULL);
+  if (!len) {
+    *err = "GetFullPathNameW(" + file_name.AsString() +
+           "): " + GetLastErrorString();
+  } else {
+    // The value of len is the buffer wide character size including the
+    // terminating L'\0'. However, the second call may return a final
+    // length that is smaller than |len - 1| for some reason.
+    result.resize(static_cast<size_t>(len) - 1);
+    DWORD final_len = GetFullPathNameW(
+        wide_filename.c_str(), len, const_cast<wchar_t*>(result.data()), NULL);
+    result.resize(static_cast<size_t>(final_len));
   }
-  return true;
+  return result;
 }
 
 bool IsPathSeparator(char c) {
@@ -76,19 +80,19 @@ bool SameDrive(StringPiece a, StringPiece b, string* err)  {
     return true;
   }
 
-  char a_absolute[_MAX_PATH];
-  char b_absolute[_MAX_PATH];
-  if (!InternalGetFullPathName(a, a_absolute, sizeof(a_absolute), err)) {
+  std::wstring a_absolute = InternalGetFullPathName(a, err);
+  if (a_absolute.empty())
     return false;
-  }
-  if (!InternalGetFullPathName(b, b_absolute, sizeof(b_absolute), err)) {
+
+  std::wstring b_absolute = InternalGetFullPathName(b, err);
+  if (b_absolute.empty())
     return false;
-  }
-  char a_drive[_MAX_DIR];
-  char b_drive[_MAX_DIR];
-  _splitpath(a_absolute, a_drive, NULL, NULL, NULL);
-  _splitpath(b_absolute, b_drive, NULL, NULL, NULL);
-  return _stricmp(a_drive, b_drive) == 0;
+
+  wchar_t a_drive[_MAX_DIR];
+  wchar_t b_drive[_MAX_DIR];
+  _wsplitpath(a_absolute.data(), a_drive, NULL, NULL, NULL);
+  _wsplitpath(b_absolute.data(), b_drive, NULL, NULL, NULL);
+  return _wcsicmp(a_drive, b_drive) == 0;
 }
 
 // Check path |s| is FullPath style returned by GetFullPathName.
@@ -137,23 +141,23 @@ IncludesNormalize::IncludesNormalize(const string& relative_to) {
 
 string IncludesNormalize::AbsPath(StringPiece s, string* err) {
   if (IsFullPathName(s)) {
-    string result = s.AsString();
-    for (size_t i = 0; i < result.size(); ++i) {
-      if (result[i] == '\\') {
-        result[i] = '/';
-      }
+    std::string result = s.AsString();
+    for (char& c : result) {
+      if (c == '\\')
+        c = '/';
     }
     return result;
   }
 
-  char result[_MAX_PATH];
-  if (!InternalGetFullPathName(s, result, sizeof(result), err)) {
+  std::wstring result = InternalGetFullPathName(s, err);
+  if (result.empty())
     return "";
+
+  for (wchar_t& c : result) {
+    if (c == L'\\')
+      c = L'/';
   }
-  for (char* c = result; *c; ++c)
-    if (*c == '\\')
-      *c = '/';
-  return result;
+  return Win32UnicodeToUTF8(result);
 }
 
 string IncludesNormalize::Relativize(
@@ -183,17 +187,11 @@ string IncludesNormalize::Relativize(
 
 bool IncludesNormalize::Normalize(const string& input,
                                   string* result, string* err) const {
-  char copy[_MAX_PATH + 1];
-  size_t len = input.size();
-  if (len > _MAX_PATH) {
-    *err = "path too long";
-    return false;
-  }
-  strncpy(copy, input.c_str(), input.size() + 1);
+  std::string copy = input;
   uint64_t slash_bits;
-  CanonicalizePath(copy, &len, &slash_bits);
-  StringPiece partially_fixed(copy, len);
-  string abs_input = AbsPath(partially_fixed, err);
+  CanonicalizePath(&copy, &slash_bits);
+  StringPiece partially_fixed(copy);
+  std::string abs_input = AbsPath(partially_fixed, err);
   if (!err->empty())
     return false;
 

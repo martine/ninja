@@ -171,7 +171,8 @@ TEST_F(DiskInterfaceTest, StatCache) {
   EXPECT_GT(disk_.Stat("subdir/subsubdir", &err), 1);
   EXPECT_EQ("", err);
 
-#ifndef _MSC_VER // TODO: Investigate why. Also see https://github.com/ninja-build/ninja/pull/1423
+#ifndef _WIN32  // TODO: Investigate why. Also see
+                // https://github.com/ninja-build/ninja/pull/1423
   EXPECT_EQ(disk_.Stat("subdir", &err),
             disk_.Stat("subdir/.", &err));
   EXPECT_EQ("", err);
@@ -257,28 +258,163 @@ TEST_F(DiskInterfaceTest, RemoveDirectory) {
   EXPECT_EQ(1, disk_.RemoveFile("does not exist"));
 }
 
-struct StatTest : public StateTestWithBuiltinRules,
-                  public DiskInterface {
+TEST_F(DiskInterfaceTest, OpenFile) {
+  // Scoped FILE pointer, ensure instance is closed
+  // when test exits, even in case of failure.
+  struct ScopedFILE {
+    ScopedFILE(FILE* f) : f_(f) {}
+    ~ScopedFILE() { Close(); }
+
+    void Close() {
+      if (f_) {
+        fclose(f_);
+        f_ = nullptr;
+      }
+    }
+
+    FILE* get() const { return f_; }
+
+    explicit operator bool() const { return !!f_; }
+
+    FILE* f_;
+  };
+
+  const char kFileName[] = "file-to-open";
+  std::string kContent = "something to write to a file\n";
+
+  // disk_.WriteFile() opens the FILE instance in binary mode, which
+  // will not convert the final \n into \r\n on Windows. However,
+  // disk_.OpenFile() can write in text mode which will do the
+  // translation on this platform.
+  ASSERT_TRUE(disk_.WriteFile(kFileName, kContent));
+  std::string kExpected = "something to write to a file\n";
+#ifdef _WIN32
+  std::string kExpectedText = "something to write to a file\r\n";
+#else
+  std::string kExpectedText = "something to write to a file\n";
+#endif
+
+  std::string contents;
+  std::string err;
+  ASSERT_EQ(FileReader::Okay, disk_.ReadFile(kFileName, &contents, &err))
+      << err;
+  ASSERT_EQ(contents, kExpected);
+
+  // Read a file.
+  {
+    ScopedFILE f(disk_.OpenFile(kFileName, "rb"));
+    ASSERT_TRUE(f);
+    ASSERT_EQ(fseek(f.get(), 0, SEEK_END), 0) << strerror(errno);
+    long file_size_long = ftell(f.get());
+    ASSERT_GE(file_size_long, 0) << strerror(errno);
+
+    size_t file_size = static_cast<size_t>(file_size_long);
+    ASSERT_EQ(file_size, kExpected.size());
+    ASSERT_EQ(fseek(f.get(), 0, SEEK_SET), 0) << strerror(errno);
+
+    contents.clear();
+    contents.resize(file_size);
+    ASSERT_EQ(fread(const_cast<char*>(contents.data()), file_size, 1, f.get()),
+              1)
+        << strerror(errno);
+    ASSERT_EQ(contents, kExpected);
+  }
+
+  // Write a file opened file disk_.OpenFile() in binary mode, then verify its
+  // content.
+  const char kFileToWrite[] = "file-to-write";
+  {
+    ScopedFILE f(disk_.OpenFile(kFileToWrite, "wb"));
+    ASSERT_TRUE(f) << strerror(errno);
+    ASSERT_EQ(fwrite(kContent.data(), kContent.size(), 1, f.get()), 1);
+  }
+
+  contents.clear();
+  ASSERT_EQ(FileReader::Okay, disk_.ReadFile(kFileToWrite, &contents, &err))
+      << err;
+  ASSERT_EQ(contents, kContent);
+
+  // Write a file opened file disk_.OpenFile() in text mode, then verify its
+  // content.
+  {
+    ScopedFILE f(disk_.OpenFile(kFileToWrite, "wt"));
+    ASSERT_TRUE(f) << strerror(errno);
+    ASSERT_EQ(fwrite(kContent.data(), kContent.size(), 1, f.get()), 1);
+  }
+
+  contents.clear();
+  ASSERT_EQ(FileReader::Okay, disk_.ReadFile(kFileToWrite, &contents, &err))
+      << err;
+  ASSERT_EQ(contents, kExpectedText);
+
+  // Append to the same file, in text mode too.
+  {
+    ScopedFILE f(disk_.OpenFile(kFileToWrite, "at"));
+    ASSERT_TRUE(f) << strerror(errno);
+    ASSERT_EQ(fwrite(kContent.data(), kContent.size(), 1, f.get()), 1);
+  }
+  std::string expected = kExpectedText + kExpectedText;
+  contents.clear();
+  ASSERT_EQ(FileReader::Okay, disk_.ReadFile(kFileToWrite, &contents, &err))
+      << err;
+  ASSERT_EQ(contents, expected);
+}
+
+TEST_F(DiskInterfaceTest, RenameFile) {
+  // Rename a simple file.
+  std::string kFileA = "a-file";
+  std::string kFileB = "b-file";
+
+  // NOTE: Do not put a newline in this string to avoid dealing
+  // with \r\n conversions on Win32.
+  std::string kContent = "something something";
+
+  ASSERT_TRUE(disk_.WriteFile(kFileA, kContent));
+  std::string err;
+  TimeStamp stamp_a = disk_.Stat(kFileA, &err);
+  ASSERT_GT(stamp_a, 0);
+
+  ASSERT_TRUE(disk_.RenameFile(kFileA, kFileB));
+  EXPECT_EQ(0, disk_.Stat(kFileA, &err));
+  EXPECT_EQ(err, "");
+
+  TimeStamp stamp_b = disk_.Stat(kFileB, &err);
+  ASSERT_GT(stamp_b, 0) << err;
+
+  // Due to limited granularity on certain filesystems, use >= instead of >
+  // in the comparison below.
+  ASSERT_GE(stamp_b, stamp_a);
+
+  std::string contents;
+  ASSERT_EQ(disk_.ReadFile(kFileB, &contents, &err), FileReader::Okay) << err;
+  ASSERT_EQ(contents, kContent);
+
+  // Now write something else to the first file, and rename
+  // the second one to the first. This should work on Posix, and
+  // fail with EEXIST on Win32!
+  ASSERT_TRUE(disk_.WriteFile(kFileA, "something else entirely"));
+  stamp_a = disk_.Stat(kFileA, &err);
+  ASSERT_GT(stamp_a, 0) << err;
+  ASSERT_GE(stamp_a, stamp_b) << err;  // see comment above.
+
+#ifdef _WIN32
+  ASSERT_FALSE(disk_.RenameFile(kFileB, kFileA));
+  EXPECT_EQ(errno, EEXIST);
+#else   // !_WIN32
+  ASSERT_TRUE(disk_.RenameFile(kFileB, kFileA)) << strerror(errno);
+  EXPECT_EQ(0, disk_.Stat(kFileB, &err)) << err;
+
+  contents.clear();
+  ASSERT_EQ(disk_.ReadFile(kFileA, &contents, &err), FileReader::Okay) << err;
+  ASSERT_EQ(contents, kContent);
+#endif  // !_WIN32
+}
+
+struct StatTest : public StateTestWithBuiltinRules, public NullDiskInterface {
   StatTest() : scan_(&state_, NULL, NULL, this, NULL, NULL) {}
 
   // DiskInterface implementation.
-  virtual TimeStamp Stat(const string& path, string* err) const;
-  virtual bool WriteFile(const string& path, const string& contents) {
-    assert(false);
-    return true;
-  }
-  virtual bool MakeDir(const string& path) {
-    assert(false);
-    return false;
-  }
-  virtual Status ReadFile(const string& path, string* contents, string* err) {
-    assert(false);
-    return NotFound;
-  }
-  virtual int RemoveFile(const string& path) {
-    assert(false);
-    return 0;
-  }
+  TimeStamp Stat(const string& path, string* err) const override;
 
   DependencyScan scan_;
   map<string, TimeStamp> mtimes_;

@@ -36,12 +36,14 @@ const char kTestFilename[] = "BuildLogTest-tempfile";
 struct BuildLogTest : public StateTestWithBuiltinRules, public BuildLogUser {
   virtual void SetUp() {
     // In case a crashing test left a stale file behind.
-    unlink(kTestFilename);
+    disk_interface_.RemoveFile(kTestFilename);
   }
-  virtual void TearDown() {
-    unlink(kTestFilename);
-  }
+  virtual void TearDown() { disk_interface_.RemoveFile(kTestFilename); }
   virtual bool IsPathDead(StringPiece s) const { return false; }
+
+  BuildLog CreateBuildLog() { return BuildLog(disk_interface_); }
+
+  SystemDiskInterface disk_interface_;
 };
 
 TEST_F(BuildLogTest, WriteRead) {
@@ -49,7 +51,7 @@ TEST_F(BuildLogTest, WriteRead) {
 "build out: cat mid\n"
 "build mid: cat in\n");
 
-  BuildLog log1;
+  BuildLog log1(disk_interface_);
   string err;
   EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
   ASSERT_EQ("", err);
@@ -57,7 +59,7 @@ TEST_F(BuildLogTest, WriteRead) {
   log1.RecordCommand(state_.edges_[1], 20, 25);
   log1.Close();
 
-  BuildLog log2;
+  BuildLog log2(disk_interface_);
   EXPECT_TRUE(log2.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
 
@@ -76,7 +78,7 @@ TEST_F(BuildLogTest, FirstWriteAddsSignature) {
   const char kExpectedVersion[] = "# ninja log vX\n";
   const size_t kVersionPos = strlen(kExpectedVersion) - 2;  // Points at 'X'.
 
-  BuildLog log;
+  BuildLog log(disk_interface_);
   string contents, err;
 
   EXPECT_TRUE(log.OpenForWrite(kTestFilename, *this, &err));
@@ -103,7 +105,7 @@ TEST_F(BuildLogTest, FirstWriteAddsSignature) {
 }
 
 TEST_F(BuildLogTest, DoubleEntry) {
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v7\n");
   fprintf(f, "0\t1\t2\tout\t%" PRIx64 "\n",
       BuildLog::LogEntry::HashCommand("command abc"));
@@ -112,7 +114,7 @@ TEST_F(BuildLogTest, DoubleEntry) {
   fclose(f);
 
   string err;
-  BuildLog log;
+  BuildLog log(disk_interface_);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
 
@@ -127,7 +129,7 @@ TEST_F(BuildLogTest, Truncate) {
 "build mid: cat in\n");
 
   {
-    BuildLog log1;
+    BuildLog log1(disk_interface_);
     string err;
     EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
     ASSERT_EQ("", err);
@@ -147,7 +149,7 @@ TEST_F(BuildLogTest, Truncate) {
   // For all possible truncations of the input file, assert that we don't
   // crash when parsing.
   for (off_t size = statbuf.st_size; size > 0; --size) {
-    BuildLog log2;
+    BuildLog log2(disk_interface_);
     string err;
     EXPECT_TRUE(log2.OpenForWrite(kTestFilename, *this, &err));
     ASSERT_EQ("", err);
@@ -157,33 +159,33 @@ TEST_F(BuildLogTest, Truncate) {
 
     ASSERT_TRUE(Truncate(kTestFilename, size, &err));
 
-    BuildLog log3;
+    BuildLog log3(disk_interface_);
     err.clear();
     ASSERT_TRUE(log3.Load(kTestFilename, &err) == LOAD_SUCCESS || !err.empty());
   }
 }
 
 TEST_F(BuildLogTest, ObsoleteOldVersion) {
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v3\n");
   fprintf(f, "123 456 0 out command\n");
   fclose(f);
 
   string err;
-  BuildLog log;
+  BuildLog log(disk_interface_);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_NE(err.find("version"), string::npos);
 }
 
 TEST_F(BuildLogTest, SpacesInOutput) {
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v7\n");
   fprintf(f, "123\t456\t456\tout with space\t%" PRIx64 "\n",
       BuildLog::LogEntry::HashCommand("command"));
   fclose(f);
 
   string err;
-  BuildLog log;
+  BuildLog log(disk_interface_);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
 
@@ -199,7 +201,7 @@ TEST_F(BuildLogTest, DuplicateVersionHeader) {
   // Old versions of ninja accidentally wrote multiple version headers to the
   // build log on Windows. This shouldn't crash, and the second version header
   // should be ignored.
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v7\n");
   fprintf(f, "123\t456\t456\tout\t%" PRIx64 "\n",
       BuildLog::LogEntry::HashCommand("command"));
@@ -209,7 +211,7 @@ TEST_F(BuildLogTest, DuplicateVersionHeader) {
   fclose(f);
 
   string err;
-  BuildLog log;
+  BuildLog log(disk_interface_);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
 
@@ -228,49 +230,42 @@ TEST_F(BuildLogTest, DuplicateVersionHeader) {
   ASSERT_NO_FATAL_FAILURE(AssertHash("command2", e->command_hash));
 }
 
-struct TestDiskInterface : public DiskInterface {
-  virtual TimeStamp Stat(const string& path, string* err) const {
-    return 4;
+struct TestDiskInterface : public RealDiskInterface {
+  void EnableMockTimestamps() { enable_mock_ = true; }
+
+  TimeStamp Stat(const string& path, string* err) const override {
+    if (enable_mock_)
+      return 4;
+    else
+      return this->RealDiskInterface::Stat(path, err);
   }
-  virtual bool WriteFile(const string& path, const string& contents) {
-    assert(false);
-    return true;
-  }
-  virtual bool MakeDir(const string& path) {
-    assert(false);
-    return false;
-  }
-  virtual Status ReadFile(const string& path, string* contents, string* err) {
-    assert(false);
-    return NotFound;
-  }
-  virtual int RemoveFile(const string& path) {
-    assert(false);
-    return 0;
-  }
+
+ private:
+  bool enable_mock_ = false;
 };
 
 TEST_F(BuildLogTest, Restat) {
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v7\n"
              "1\t2\t3\tout\tcommand\n");
   fclose(f);
   std::string err;
-  BuildLog log;
+  TestDiskInterface testDiskInterface;
+  BuildLog log(testDiskInterface);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
   BuildLog::LogEntry* e = log.LookupByOutput("out");
   ASSERT_EQ(3, e->mtime);
 
-  TestDiskInterface testDiskInterface;
   char out2[] = { 'o', 'u', 't', '2', 0 };
   char* filter2[] = { out2 };
-  EXPECT_TRUE(log.Restat(kTestFilename, testDiskInterface, 1, filter2, &err));
+  testDiskInterface.EnableMockTimestamps();
+  EXPECT_TRUE(log.Restat(kTestFilename, 1, filter2, &err));
   ASSERT_EQ("", err);
   e = log.LookupByOutput("out");
   ASSERT_EQ(3, e->mtime); // unchanged, since the filter doesn't match
 
-  EXPECT_TRUE(log.Restat(kTestFilename, testDiskInterface, 0, NULL, &err));
+  EXPECT_TRUE(log.Restat(kTestFilename, 0, NULL, &err));
   ASSERT_EQ("", err);
   e = log.LookupByOutput("out");
   ASSERT_EQ(4, e->mtime);
@@ -279,7 +274,7 @@ TEST_F(BuildLogTest, Restat) {
 TEST_F(BuildLogTest, VeryLongInputLine) {
   // Ninja's build log buffer is currently 256kB. Lines longer than that are
   // silently ignored, but don't affect parsing of other lines.
-  FILE* f = fopen(kTestFilename, "wb");
+  FILE* f = disk_interface_.OpenFile(kTestFilename, "wb");
   fprintf(f, "# ninja log v7\n");
   fprintf(f, "123\t456\t456\tout\tcommand start");
   for (size_t i = 0; i < (512 << 10) / strlen(" more_command"); ++i)
@@ -290,7 +285,7 @@ TEST_F(BuildLogTest, VeryLongInputLine) {
   fclose(f);
 
   string err;
-  BuildLog log;
+  BuildLog log(disk_interface_);
   EXPECT_TRUE(log.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
 
@@ -309,7 +304,7 @@ TEST_F(BuildLogTest, MultiTargetEdge) {
   AssertParse(&state_,
 "build out out.d: cat\n");
 
-  BuildLog log;
+  BuildLog log(disk_interface_);
   log.RecordCommand(state_.edges_[0], 21, 22);
 
   ASSERT_EQ(2u, log.entries().size());
@@ -334,7 +329,7 @@ TEST_F(BuildLogRecompactTest, Recompact) {
 "build out: cat in\n"
 "build out2: cat in\n");
 
-  BuildLog log1;
+  BuildLog log1(disk_interface_);
   string err;
   EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
   ASSERT_EQ("", err);
@@ -346,7 +341,7 @@ TEST_F(BuildLogRecompactTest, Recompact) {
   log1.Close();
 
   // Load...
-  BuildLog log2;
+  BuildLog log2(disk_interface_);
   EXPECT_TRUE(log2.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
   ASSERT_EQ(2u, log2.entries().size());
@@ -357,7 +352,7 @@ TEST_F(BuildLogRecompactTest, Recompact) {
   log2.Close();
 
   // "out2" is dead, it should've been removed.
-  BuildLog log3;
+  BuildLog log3(disk_interface_);
   EXPECT_TRUE(log2.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
   ASSERT_EQ(1u, log2.entries().size());

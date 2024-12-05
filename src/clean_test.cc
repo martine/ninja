@@ -13,10 +13,11 @@
 // limitations under the License.
 
 #include "clean.h"
-#include "build.h"
 
-#include "util.h"
+#include "build.h"
+#include "disk_interface.h"
 #include "test.h"
+#include "util.h"
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -469,13 +470,13 @@ TEST_F(CleanTest, CleanDepFileAndRspFileWithSpaces) {
 struct CleanDeadTest : public CleanTest, public BuildLogUser{
   virtual void SetUp() {
     // In case a crashing test left a stale file behind.
-    unlink(kTestFilename);
+    disk_interface_.RemoveFile(kTestFilename);
     CleanTest::SetUp();
   }
-  virtual void TearDown() {
-    unlink(kTestFilename);
-  }
+  virtual void TearDown() { disk_interface_.RemoveFile(kTestFilename); }
   virtual bool IsPathDead(StringPiece) const { return false; }
+
+  SystemDiskInterface disk_interface_;
 };
 
 TEST_F(CleanDeadTest, CleanDead) {
@@ -493,7 +494,7 @@ TEST_F(CleanDeadTest, CleanDead) {
   fs_.Create("out1", "");
   fs_.Create("out2", "");
 
-  BuildLog log1;
+  BuildLog log1(disk_interface_);
   string err;
   EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
   ASSERT_EQ("", err);
@@ -501,7 +502,7 @@ TEST_F(CleanDeadTest, CleanDead) {
   log1.RecordCommand(state.edges_[1], 20, 25);
   log1.Close();
 
-  BuildLog log2;
+  BuildLog log2(disk_interface_);
   EXPECT_TRUE(log2.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
   ASSERT_EQ(2u, log2.entries().size());
@@ -556,7 +557,7 @@ TEST_F(CleanDeadTest, CleanDeadPreservesInputs) {
   fs_.Create("out1", "");
   fs_.Create("out2", "");
 
-  BuildLog log1;
+  BuildLog log1(disk_interface_);
   string err;
   EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
   ASSERT_EQ("", err);
@@ -564,7 +565,7 @@ TEST_F(CleanDeadTest, CleanDeadPreservesInputs) {
   log1.RecordCommand(state.edges_[1], 20, 25);
   log1.Close();
 
-  BuildLog log2;
+  BuildLog log2(disk_interface_);
   EXPECT_TRUE(log2.Load(kTestFilename, &err));
   ASSERT_EQ("", err);
   ASSERT_EQ(2u, log2.entries().size());

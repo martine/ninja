@@ -15,9 +15,12 @@
 #ifndef NINJA_BUILD_LOG_H_
 #define NINJA_BUILD_LOG_H_
 
-#include <string>
 #include <stdio.h>
 
+#include <memory>
+#include <string>
+
+#include "disk_interface.h"
 #include "hash_map.h"
 #include "load_status.h"
 #include "timestamp.h"
@@ -41,7 +44,10 @@ struct BuildLogUser {
 /// 2) timing information, perhaps for generating reports
 /// 3) restat information
 struct BuildLog {
-  BuildLog();
+  /// Constructor takes a reference to an existing DiskInterface instance.
+  BuildLog(DiskInterface& disk_interface);
+
+  /// Destructor.
   ~BuildLog();
 
   /// Prepares writing to the log file without actually opening it - that will
@@ -87,21 +93,25 @@ struct BuildLog {
                  std::string* err);
 
   /// Restat all outputs in the log
-  bool Restat(StringPiece path, const DiskInterface& disk_interface,
-              int output_count, char** outputs, std::string* err);
+  bool Restat(StringPiece path, int output_count, char** outputs,
+              std::string* err);
 
   typedef ExternalStringHashMap<LogEntry*>::Type Entries;
   const Entries& entries() const { return entries_; }
 
  private:
+  /// Default destructor is private and never implemented.
+  BuildLog() = delete;
+
   /// Should be called before using log_file_. When false is returned, errno
   /// will be set.
   bool OpenForWriteIfNeeded();
 
+  DiskInterface* disk_interface_ = nullptr;
   Entries entries_;
-  FILE* log_file_;
+  FILE* log_file_ = nullptr;
   std::string log_file_path_;
-  bool needs_recompaction_;
+  bool needs_recompaction_ = false;
 };
 
 #endif // NINJA_BUILD_LOG_H_

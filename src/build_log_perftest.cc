@@ -35,7 +35,8 @@ struct NoDeadPaths : public BuildLogUser {
 };
 
 bool WriteTestData(string* err) {
-  BuildLog log;
+  SystemDiskInterface disk_interface;
+  BuildLog log(disk_interface);
 
   NoDeadPaths no_dead_paths;
   if (!log.OpenForWrite(kTestFilename, no_dead_paths, err))
@@ -109,9 +110,10 @@ int main() {
     return 1;
   }
 
+  SystemDiskInterface disk_interface;
   {
     // Read once to warm up disk cache.
-    BuildLog log;
+    BuildLog log(disk_interface);
     if (log.Load(kTestFilename, &err) == LOAD_ERROR) {
       fprintf(stderr, "Failed to read test data: %s\n", err.c_str());
       return 1;
@@ -120,7 +122,7 @@ int main() {
   const int kNumRepetitions = 5;
   for (int i = 0; i < kNumRepetitions; ++i) {
     int64_t start = GetTimeMillis();
-    BuildLog log;
+    BuildLog log(disk_interface);
     if (log.Load(kTestFilename, &err) == LOAD_ERROR) {
       fprintf(stderr, "Failed to read test data: %s\n", err.c_str());
       return 1;
