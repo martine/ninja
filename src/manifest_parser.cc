@@ -407,7 +407,11 @@ bool ManifestParser::ParseEdge(string* err) {
     vector<Node*>::iterator dgi =
       std::find(edge->inputs_.begin(), edge->inputs_.end(), edge->dyndep_);
     if (dgi == edge->inputs_.end()) {
-      return lexer_.Error("dyndep '" + dyndep + "' is not an input", err);
+      //dyndep not found in inputs, lets check if we have it as output
+      dgi = std::find(edge->outputs_.begin(), edge->outputs_.end(), edge->dyndep_);
+      if (dgi == edge->outputs_.end()) {
+        return lexer_.Error("dyndep '" + dyndep + "' is not an input nor an output", err);
+      }
     }
     assert(!edge->dyndep_->generated_by_dep_loader());
   }

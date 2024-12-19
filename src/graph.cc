@@ -110,8 +110,8 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   stack->push_back(node);
 
   bool dirty = false;
-  edge->outputs_ready_ = true;
   edge->deps_missing_ = false;
+  edge->outputs_ready_ = true;
 
   if (!edge->deps_loaded_) {
     // This is our first encounter with this edge.
@@ -126,17 +126,62 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
     //   Later during the build the dyndep file will become ready and be
     //   loaded to update this edge before it can possibly be scheduled.
     if (edge->dyndep_ && edge->dyndep_->dyndep_pending()) {
-      if (!RecomputeNodeDirty(edge->dyndep_, stack, validation_nodes, err))
-        return false;
+      if(edge->dyndep_->in_edge() == edge) {
+        Node* most_recent_input = NULL;
+        for (vector<Node*>::iterator i = edge->inputs_.begin();
+            i != edge->inputs_.end(); ++i) {
+          // Visit this input.
+          if (!RecomputeNodeDirty(*i, stack, validation_nodes, err))
+            return false;
 
-      if (!edge->dyndep_->in_edge() ||
-          edge->dyndep_->in_edge()->outputs_ready()) {
-        // The dyndep file is ready, so load it now.
-        if (!LoadDyndeps(edge->dyndep_, err))
+          // If an input is not ready, neither are our outputs.
+          if (Edge* in_edge = (*i)->in_edge()) {
+            if (!in_edge->outputs_ready_)
+              edge->outputs_ready_ = false;
+          }
+
+          if (!edge->is_order_only(i - edge->inputs_.begin())) {
+            // If a regular input is dirty (or missing), we're dirty.
+            // Otherwise consider mtime.
+            if ((*i)->dirty()) {
+              explanations_.Record(node, "%s is dirty", (*i)->path().c_str());
+              dirty = true;
+            } else {
+              if (!most_recent_input || (*i)->mtime() > most_recent_input->mtime()) {
+                most_recent_input = *i;
+              }
+            }
+          }
+        }
+    
+        // Load output mtimes so we can compare them to the most recent input below.
+        for (vector<Node*>::iterator o = edge->outputs_.begin();
+            o != edge->outputs_.end(); ++o) {
+          if (!(*o)->StatIfNecessary(disk_interface_, err))
+            return false;
+        }
+
+        if (!RecomputeOutputsDirty(edge, most_recent_input, &dirty, err))
           return false;
+        if(!dirty) {
+          // The dyndep file is ready, so load it now.
+          if (!LoadDyndeps(edge->dyndep_, err))
+            return false;
+        }
+      } else {
+        if (!RecomputeNodeDirty(edge->dyndep_, stack, validation_nodes, err))
+          return false;
+
+        if (!edge->dyndep_->in_edge() ||
+            edge->dyndep_->in_edge()->outputs_ready()) {
+          // The dyndep file is ready, so load it now.
+          if (!LoadDyndeps(edge->dyndep_, err))
+            return false;
+        }
       }
     }
   }
+
 
   // Load output mtimes so we can compare them to the most recent input below.
   for (vector<Node*>::iterator o = edge->outputs_.begin();

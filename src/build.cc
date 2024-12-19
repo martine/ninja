@@ -209,8 +209,10 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
   edge->outputs_ready_ = true;
 
   // Check off any nodes we were waiting for with this edge.
-  for (vector<Node*>::iterator o = edge->outputs_.begin();
-       o != edge->outputs_.end(); ++o) {
+  // Iterate over a copy, since NodeFinished might update (implicit) outputs.
+  vector<Node*> edgeOutputs(edge->outputs_);
+  for (vector<Node*>::iterator o = edgeOutputs.begin();
+       o != edgeOutputs.end(); ++o) {
     if (!NodeFinished(*o, err))
       return false;
   }

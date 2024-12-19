@@ -1086,7 +1086,7 @@ TEST_F(ParserTest, DyndepNotInput) {
 "build result: touch\n"
 "  dyndep = notin\n",
                                &err));
-  EXPECT_EQ("input:5: dyndep 'notin' is not an input\n", err);
+  EXPECT_EQ("input:5: dyndep 'notin' is not an input nor an output\n", err);
 }
 
 TEST_F(ParserTest, DyndepExplicitInput) {

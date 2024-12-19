@@ -43,6 +43,23 @@ bool DyndepLoader::LoadDyndeps(Node* node, DyndepFile* ddf,
   if (!LoadDyndepFile(node, ddf, err))
     return false;
 
+  if(node->in_edge() != nullptr && node->in_edge()->dyndep_ == node) {
+    Edge* const edge = node->in_edge();
+    DyndepFile::iterator ddi = ddf->find(edge);
+    if (ddi == ddf->end()) {
+      *err = ("'" + edge->outputs_[0]->path() + "' "
+              "not mentioned in its dyndep file "
+              "'" + node->path() + "'");
+      return false;
+    }
+
+    ddi->second.used_ = true;
+    Dyndeps const& dyndeps = ddi->second;
+    if (!UpdateEdge(edge, &dyndeps, err)) {
+      return false;
+    }
+  }
+
   // Update each edge that specified this node as its dyndep binding.
   std::vector<Edge*> const& out_edges = node->out_edges();
   for (Edge* edge : out_edges) {
