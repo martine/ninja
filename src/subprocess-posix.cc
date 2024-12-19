@@ -256,11 +256,11 @@ bool SubprocessSet::DoWork() {
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ++i) {
     int fd = (*i)->fd_;
-    if (fd < 0)
-      continue;
-    pollfd pfd = { fd, POLLIN | POLLPRI, 0 };
-    fds.push_back(pfd);
-    ++nfds;
+    if (fd >= 0) {
+      pollfd pfd = { fd, POLLIN | POLLPRI, 0 };
+      fds.push_back(pfd);
+      ++nfds;
+    }
   }
 
   interrupted_ = 0;
@@ -281,18 +281,18 @@ bool SubprocessSet::DoWork() {
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ) {
     int fd = (*i)->fd_;
-    if (fd < 0)
-      continue;
-    assert(fd == fds[cur_nfd].fd);
-    if (fds[cur_nfd++].revents) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
-        continue;
+    if (fd >= 0) {
+      assert(fd == fds[cur_nfd].fd);
+      if (fds[cur_nfd++].revents) {
+        (*i)->OnPipeReady();
       }
     }
-    ++i;
+    if ((*i)->Done()) {
+      finished_.push(*i);
+      i = running_.erase(i);
+    } else {
+      ++i;
+    }
   }
 
   return IsInterrupted();
@@ -333,13 +333,13 @@ bool SubprocessSet::DoWork() {
     int fd = (*i)->fd_;
     if (fd >= 0 && FD_ISSET(fd, &set)) {
       (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
-        continue;
-      }
     }
-    ++i;
+    if ((*i)->Done()) {
+      finished_.push(*i);
+      i = running_.erase(i);
+    } else {
+      ++i;
+    }
   }
 
   return IsInterrupted();
