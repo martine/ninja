@@ -118,15 +118,14 @@ bool StatAllFilesInDir(const string& dir, map<string, TimeStamp>* stamps,
     return false;
   }
   do {
-    string lowername = ffd.cFileName;
-    if (lowername == "..") {
+    if (ffd.cFileName[0] == '.' && ffd.cFileName[1] == '.') {
       // Seems to just copy the timestamp for ".." from ".", which is wrong.
       // This is the case at least on NTFS under Windows 7.
       continue;
     }
-    transform(lowername.begin(), lowername.end(), lowername.begin(), ::tolower);
-    stamps->insert(make_pair(lowername,
-                             TimeStampFromFileTime(ffd.ftLastWriteTime)));
+    std::string lowername = ffd.cFileName;
+    std::transform(lowername.begin(), lowername.end(), lowername.begin(), ::tolower);
+    stamps->emplace(std::move(lowername), TimeStampFromFileTime(ffd.ftLastWriteTime));
   } while (FindNextFileA(find_handle, &ffd));
   FindClose(find_handle);
   return true;
