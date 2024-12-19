@@ -348,7 +348,7 @@ if platform.is_msvc():
               '/wd4267',
               '/DNOMINMAX', '/D_CRT_SECURE_NO_WARNINGS',
               '/D_HAS_EXCEPTIONS=0',
-              '/DNINJA_PYTHON="%s"' % options.with_python]
+              '/DNINJA_PYTHON=\\"%s\\"' % options.with_python]
     if platform.msvc_needs_fs():
         cflags.append('/FS')
     ldflags = ['/DEBUG', '/libpath:$builddir']

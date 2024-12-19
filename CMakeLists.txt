@@ -119,7 +119,7 @@ function(check_platform_supports_browse_mode RESULT)
 
 endfunction()
 
-set(NINJA_PYTHON "python" CACHE STRING "Python interpreter to use for the browse tool")
+set(NINJA_PYTHON "python3" CACHE STRING "Python interpreter to use for the browse tool")
 
 check_platform_supports_browse_mode(platform_supports_ninja_browse)
 
@@ -310,6 +310,10 @@ if(BUILD_TESTING)
     manifest_parser_perftest
   )
     add_executable(${perftest} src/${perftest}.cc)
+    set_source_files_properties(src/${perftest}.cc
+      PROPERTIES
+        COMPILE_DEFINITIONS NINJA_PYTHON="${NINJA_PYTHON}"
+    )
     target_link_libraries(${perftest} PRIVATE libninja libninja-re2c)
   endforeach()
 
