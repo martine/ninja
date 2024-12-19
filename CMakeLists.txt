@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.18)
 
 include(CheckSymbolExists)
 include(CheckIPOSupported)
 
 option(NINJA_BUILD_BINARY "Build ninja binary" ON)
+option(NINJA_BUILD_DOC "Build ninja's manual" ON)
 option(NINJA_FORCE_PSELECT "Use pselect() even on platforms that provide ppoll()" OFF)
 
 project(ninja CXX)
@@ -122,6 +123,18 @@ endfunction()
 set(NINJA_PYTHON "python" CACHE STRING "Python interpreter to use for the browse tool")
 
 check_platform_supports_browse_mode(platform_supports_ninja_browse)
+
+if(NINJA_BUILD_DOC)
+	find_program(Asciidoc_Executable asciidoc)
+
+	find_package(LibXslt REQUIRED)
+
+	if(NOT Asciidoc_Executable OR NOT TARGET LibXslt::xsltproc)
+		message(SEND_ERROR "asciidoc and xsltproc are required to build the documentation")
+	else()
+		add_subdirectory(doc)
+	endif()
+endif()
 
 # Core source files all build into ninja library.
 add_library(libninja OBJECT
