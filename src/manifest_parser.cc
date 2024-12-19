@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <memory>
 #include <vector>
 
 #include "graph.h"
@@ -143,7 +144,7 @@ bool ManifestParser::ParseRule(string* err) {
   if (env_->LookupRuleCurrentScope(name) != NULL)
     return lexer_.Error("duplicate rule '" + name + "'", err);
 
-  Rule* rule = new Rule(name);  // XXX scoped_ptr
+  auto rule = std::unique_ptr<Rule>(new Rule(name));
 
   while (lexer_.PeekToken(Lexer::INDENT)) {
     string key;
@@ -169,7 +170,7 @@ bool ManifestParser::ParseRule(string* err) {
   if (rule->bindings_["command"].empty())
     return lexer_.Error("expected 'command =' line", err);
 
-  env_->AddRule(rule);
+  env_->AddRule(std::move(rule));
   return true;
 }
 

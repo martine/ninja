@@ -680,12 +680,12 @@ int NinjaMain::ToolRules(const Options* options, int argc, char* argv[]) {
 
   // Print rules
 
-  typedef map<string, const Rule*> Rules;
+  typedef map<string, std::unique_ptr<const Rule>> Rules;
   const Rules& rules = state_.bindings_.GetRules();
   for (Rules::const_iterator i = rules.begin(); i != rules.end(); ++i) {
     printf("%s", i->first.c_str());
     if (print_description) {
-      const Rule* rule = i->second;
+      const Rule* rule = i->second.get();
       const EvalString* description = rule->GetBinding("description");
       if (description != NULL) {
         printf(": %s", description->Unparse().c_str());

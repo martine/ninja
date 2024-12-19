@@ -31,22 +31,22 @@ void BindingEnv::AddBinding(const string& key, const string& val) {
   bindings_[key] = val;
 }
 
-void BindingEnv::AddRule(const Rule* rule) {
+void BindingEnv::AddRule(std::unique_ptr<const Rule> rule) {
   assert(LookupRuleCurrentScope(rule->name()) == NULL);
-  rules_[rule->name()] = rule;
+  rules_[rule->name()] = std::move(rule);
 }
 
 const Rule* BindingEnv::LookupRuleCurrentScope(const string& rule_name) {
-  map<string, const Rule*>::iterator i = rules_.find(rule_name);
+  auto i = rules_.find(rule_name);
   if (i == rules_.end())
     return NULL;
-  return i->second;
+  return i->second.get();
 }
 
 const Rule* BindingEnv::LookupRule(const string& rule_name) {
-  map<string, const Rule*>::iterator i = rules_.find(rule_name);
+  auto i = rules_.find(rule_name);
   if (i != rules_.end())
-    return i->second;
+    return i->second.get();
   if (parent_)
     return parent_->LookupRule(rule_name);
   return NULL;
@@ -61,6 +61,16 @@ const EvalString* Rule::GetBinding(const string& key) const {
   if (i == bindings_.end())
     return NULL;
   return &i->second;
+}
+
+std::unique_ptr<Rule> Rule::Phony() {
+  auto rule = std::unique_ptr<Rule>(new Rule("phony"));
+  rule->phony_ = true;
+  return rule;
+}
+
+bool Rule::IsPhony() const {
+  return phony_;
 }
 
 // static
@@ -78,7 +88,7 @@ bool Rule::IsReservedBinding(const string& var) {
       var == "msvc_deps_prefix";
 }
 
-const map<string, const Rule*>& BindingEnv::GetRules() const {
+const map<string, std::unique_ptr<const Rule>>& BindingEnv::GetRules() const {
   return rules_;
 }
 

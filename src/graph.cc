@@ -559,7 +559,7 @@ void Edge::Dump(const char* prefix) const {
 }
 
 bool Edge::is_phony() const {
-  return rule_ == &State::kPhonyRule;
+  return rule_->IsPhony();
 }
 
 bool Edge::use_console() const {

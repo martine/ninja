@@ -31,7 +31,7 @@ TEST(State, Basic) {
 
   Rule* rule = new Rule("cat");
   rule->AddBinding("command", command);
-  state.bindings_.AddRule(rule);
+  state.bindings_.AddRule(std::unique_ptr<Rule>(rule));
 
   Edge* edge = state.AddEdge(rule);
   state.AddIn(edge, "in1", 0);

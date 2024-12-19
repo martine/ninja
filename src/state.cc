@@ -63,10 +63,9 @@ void Pool::Dump() const {
 
 Pool State::kDefaultPool("", 0);
 Pool State::kConsolePool("console", 1);
-const Rule State::kPhonyRule("phony");
 
 State::State() {
-  bindings_.AddRule(&kPhonyRule);
+  bindings_.AddRule(Rule::Phony());
   AddPool(&kDefaultPool);
   AddPool(&kConsolePool);
 }
