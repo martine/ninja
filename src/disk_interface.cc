@@ -336,6 +336,9 @@ int RealDiskInterface::RemoveFile(const string& path) {
     switch (errno) {
       case ENOENT:
         return 1;
+      case ENOTEMPTY:
+        Warning("remove(%s) ignored: %s", path.c_str(), strerror(errno));
+        return 0;
       default:
         Error("remove(%s): %s", path.c_str(), strerror(errno));
         return -1;

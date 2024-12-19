@@ -319,6 +319,9 @@ the given rules.
 Files created but not referenced in the graph are not removed. This
 tool takes in account the +-v+ and the +-n+ options (note that +-n+
 implies +-v+).
++
+Non-empty directories created by the generator or any build targets are not
+recursively removed, these are silently ignored.
 
 `cleandead`:: remove files produced by previous builds that are no longer in the
 build file. _Available since Ninja 1.10._
