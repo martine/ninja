@@ -39,9 +39,9 @@ struct Status {
   /// (which is the default).
   virtual void SetExplanations(Explanations*) = 0;
 
-  virtual void Info(const char* msg, ...) = 0;
-  virtual void Warning(const char* msg, ...) = 0;
-  virtual void Error(const char* msg, ...) = 0;
+  virtual void Info(const char* msg, ...) const = 0;
+  virtual void Warning(const char* msg, ...) const = 0;
+  virtual void Error(const char* msg, ...) const = 0;
 
   virtual ~Status() { }
 

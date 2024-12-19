@@ -36,9 +36,18 @@ struct StatusPrinter : Status {
   void BuildStarted() override;
   void BuildFinished() override;
 
-  void Info(const char* msg, ...) override;
-  void Warning(const char* msg, ...) override;
-  void Error(const char* msg, ...) override;
+  void Info(const char* msg, ...) const override;
+  void Warning(const char* msg, ...) const override;
+  void Error(const char* msg, ...) const override;
+
+  /// Validate the given status format string to verify it only contains valid
+  /// escape sequences. On failure, an error message is copied to error_output
+  /// if it isn't null.
+  /// @param progress_status_format The format of the progress status.
+  /// @param error_output Where to write the error message on failure.
+  /// @return Whether the string is a valid progress status format.
+  static bool IsValidProgressStatus(const char* progress_status_format,
+                                    std::string* error_output = nullptr);
 
   /// Format the progress status string by replacing the placeholders.
   /// See the user manual for more information about the available
@@ -91,7 +100,7 @@ struct StatusPrinter : Status {
   Explanations* explanations_ = nullptr;
 
   /// The custom progress status format to use.
-  const char* progress_status_format_;
+  const char* progress_status_format_ = nullptr;
 
   template <size_t S>
   void SnprintfRate(double rate, char (&buf)[S], const char* format) const {

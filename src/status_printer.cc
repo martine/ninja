@@ -42,15 +42,24 @@ Status* Status::factory(const BuildConfig& config) {
 
 StatusPrinter::StatusPrinter(const BuildConfig& config)
     : config_(config), started_edges_(0), finished_edges_(0), total_edges_(0),
-      running_edges_(0), progress_status_format_(NULL),
-      current_rate_(config.parallelism) {
+      running_edges_(0), current_rate_(config.parallelism) {
   // Don't do anything fancy in verbose mode.
   if (config_.verbosity != BuildConfig::NORMAL)
     printer_.set_smart_terminal(false);
 
+  // The progress status format to use by default
+  static const char kDefaultProgressStatusFormat[] = "[%f/%t] ";
+
   progress_status_format_ = getenv("NINJA_STATUS");
+
+  std::string error_output;
+  if (progress_status_format_ &&
+      !IsValidProgressStatus(progress_status_format_, &error_output)) {
+    Warning("%s", error_output.c_str());
+    progress_status_format_ = nullptr;
+  }
   if (!progress_status_format_)
-    progress_status_format_ = "[%f/%t] ";
+    progress_status_format_ = kDefaultProgressStatusFormat;
 }
 
 void StatusPrinter::EdgeAddedToPlan(const Edge* edge) {
@@ -259,6 +268,45 @@ void StatusPrinter::BuildFinished() {
   printer_.PrintOnNewLine("");
 }
 
+bool StatusPrinter::IsValidProgressStatus(const char* progress_status_format,
+                                          string* error_output) {
+  for (const char* s = progress_status_format; *s != '\0'; ++s) {
+    if (*s != '%')
+      continue;
+
+    ++s;
+    switch (*s) {
+    case 's':  // The number of started edges.
+    case 't':  // The total number of edges that must be run to complete the
+               // build.
+    case 'p':  // The percentage of finished edges.
+    case 'r':  // The number of currently running edges.
+    case 'u':  // The number of remaining edges to start.
+    case 'f':  // The number of finished edges.
+    case 'o':  // Overall rate of finished edges per second
+    case 'c':  // Current rate of finished edges per second (average over builds
+    case 'e':  // Elapsed time in seconds.
+    case 'E':  // Remaining time (ETA) in seconds.
+    case 'w':  // Elapsed time in [h:]mm:ss format.
+    case 'W':  // Remaining time (ETA) in [h:]mm:ss format.
+    case 'P':  // The percentage (in ppp% format) of time elapsed out of
+               // predicted total runtime.
+    case '%':  // A plain `%` character.
+      break;
+
+    default:
+      if (error_output) {
+        char buffer[64];
+        snprintf(buffer, sizeof(buffer),
+                 "unknown placeholder '%%%c' in $NINJA_STATUS", *s);
+        *error_output = buffer;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
                                            int64_t time_millis) const {
   string out;
@@ -392,7 +440,6 @@ string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
       }
 
       default:
-        Fatal("unknown placeholder '%%%c' in $NINJA_STATUS", *s);
         return "";
       }
     } else {
@@ -439,21 +486,21 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
                  force_full_command ? LinePrinter::FULL : LinePrinter::ELIDE);
 }
 
-void StatusPrinter::Warning(const char* msg, ...) {
+void StatusPrinter::Warning(const char* msg, ...) const {
   va_list ap;
   va_start(ap, msg);
   ::Warning(msg, ap);
   va_end(ap);
 }
 
-void StatusPrinter::Error(const char* msg, ...) {
+void StatusPrinter::Error(const char* msg, ...) const {
   va_list ap;
   va_start(ap, msg);
   ::Error(msg, ap);
   va_end(ap);
 }
 
-void StatusPrinter::Info(const char* msg, ...) {
+void StatusPrinter::Info(const char* msg, ...) const {
   va_list ap;
   va_start(ap, msg);
   ::Info(msg, ap);
