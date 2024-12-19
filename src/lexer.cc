@@ -61,7 +61,7 @@ bool Lexer::Error(const string& message, string* err) {
   return false;
 }
 
-Lexer::Lexer(const char* input) {
+Lexer::Lexer(Arena* arena, const char* input) : arena_(arena) {
   Start("input", input);
 }
 
@@ -688,7 +688,7 @@ yy102:
 		goto yy102;
 	}
 	{
-      eval->AddText(StringPiece(start, p - start));
+      eval->AddText(arena_->PersistStringPiece(StringPiece(start, p - start)));
       continue;
     }
 yy105:
@@ -700,7 +700,7 @@ yy105:
       } else {
         if (*start == '\n')
           break;
-        eval->AddText(StringPiece(start, 1));
+        eval->AddText(arena_->PersistStringPiece(StringPiece(start, 1)));
         continue;
       }
     }
@@ -780,7 +780,7 @@ yy122:
 		goto yy122;
 	}
 	{
-      eval->AddSpecial(StringPiece(start + 1, p - start - 1));
+      eval->AddSpecial(arena_->PersistStringPiece(StringPiece(start + 1, p - start - 1)));
       continue;
     }
 yy125:
@@ -812,7 +812,7 @@ yy131:
 yy134:
 	++p;
 	{
-      eval->AddSpecial(StringPiece(start + 2, p - start - 3));
+      eval->AddSpecial(arena_->PersistStringPiece(StringPiece(start + 2, p - start - 3)));
       continue;
     }
 }

@@ -125,6 +125,7 @@ check_platform_supports_browse_mode(platform_supports_ninja_browse)
 
 # Core source files all build into ninja library.
 add_library(libninja OBJECT
+	src/arena.cc
 	src/build_log.cc
 	src/build.cc
 	src/clean.cc
@@ -265,6 +266,7 @@ if(BUILD_TESTING)
 
   # Tests all build into ninja_test executable.
   add_executable(ninja_test
+    src/arena_test.cc
     src/build_log_test.cc
     src/build_test.cc
     src/clean_test.cc

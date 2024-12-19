@@ -40,6 +40,7 @@ private:
   bool ParseLet(std::string* key, EvalString* val, std::string* err);
   bool ParseEdge(std::string* err);
 
+  Arena arena_;
   DyndepFile* dyndep_file_;
   BindingEnv env_;
 };

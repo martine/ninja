@@ -24,8 +24,8 @@ struct State;
 
 /// Base class for parsers.
 struct Parser {
-  Parser(State* state, FileReader* file_reader)
-      : state_(state), file_reader_(file_reader) {}
+  Parser(State* state, FileReader* file_reader, Arena *arena)
+      : state_(state), file_reader_(file_reader), lexer_(arena) {}
   virtual ~Parser() {}
 
   /// Load and parse a file.

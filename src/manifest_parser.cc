@@ -29,7 +29,7 @@ using namespace std;
 
 ManifestParser::ManifestParser(State* state, FileReader* file_reader,
                                ManifestParserOptions options)
-    : Parser(state, file_reader),
+    : Parser(state, file_reader, &arena_),
       options_(options), quiet_(false) {
   env_ = &state->bindings_;
 }
@@ -209,6 +209,7 @@ bool ManifestParser::ParseDefault(string* err) {
 }
 
 bool ManifestParser::ParseEdge(string* err) {
+  arena_.Clear();
   ins_.clear();
   outs_.clear();
   validations_.clear();

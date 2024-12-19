@@ -26,7 +26,7 @@ using namespace std;
 
 DyndepParser::DyndepParser(State* state, FileReader* file_reader,
                            DyndepFile* dyndep_file)
-    : Parser(state, file_reader)
+    : Parser(state, file_reader, &arena_)
     , dyndep_file_(dyndep_file) {
 }
 

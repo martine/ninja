@@ -19,28 +19,32 @@
 
 using namespace std;
 
-TEST(Lexer, ReadVarValue) {
-  Lexer lexer("plain text $var $VaR ${x}\n");
+struct LexerTest : public testing::Test {
+  Arena arena_;
+};
+
+TEST_F(LexerTest, ReadVarValue) {
+  Lexer lexer(&arena_, "plain text $var $VaR ${x}\n");
   EvalString eval;
   string err;
   EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
   EXPECT_EQ("", err);
-  EXPECT_EQ("[plain text ][$var][ ][$VaR][ ][$x]",
+  EXPECT_EQ("[plain][ ][text][ ][$var][ ][$VaR][ ][$x]",
             eval.Serialize());
 }
 
-TEST(Lexer, ReadEvalStringEscapes) {
-  Lexer lexer("$ $$ab c$: $\ncde\n");
+TEST_F(LexerTest, ReadEvalStringEscapes) {
+  Lexer lexer(&arena_, "$ $$ab c$: $\ncde\n");
   EvalString eval;
   string err;
   EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
   EXPECT_EQ("", err);
-  EXPECT_EQ("[ $ab c: cde]",
+  EXPECT_EQ("[ ][$][ab][ ][c][:][ ][cde]",
             eval.Serialize());
 }
 
-TEST(Lexer, ReadIdent) {
-  Lexer lexer("foo baR baz_123 foo-bar");
+TEST_F(LexerTest, ReadIdent) {
+  Lexer lexer(&arena_, "foo baR baz_123 foo-bar");
   string ident;
   EXPECT_TRUE(lexer.ReadIdent(&ident));
   EXPECT_EQ("foo", ident);
@@ -52,10 +56,10 @@ TEST(Lexer, ReadIdent) {
   EXPECT_EQ("foo-bar", ident);
 }
 
-TEST(Lexer, ReadIdentCurlies) {
+TEST_F(LexerTest, ReadIdentCurlies) {
   // Verify that ReadIdent includes dots in the name,
   // but in an expansion $bar.dots stops at the dot.
-  Lexer lexer("foo.dots $bar.dots ${bar.dots}\n");
+  Lexer lexer(&arena_, "foo.dots $bar.dots ${bar.dots}\n");
   string ident;
   EXPECT_TRUE(lexer.ReadIdent(&ident));
   EXPECT_EQ("foo.dots", ident);
@@ -64,12 +68,12 @@ TEST(Lexer, ReadIdentCurlies) {
   string err;
   EXPECT_TRUE(lexer.ReadVarValue(&eval, &err));
   EXPECT_EQ("", err);
-  EXPECT_EQ("[$bar][.dots ][$bar.dots]",
+  EXPECT_EQ("[$bar][.dots][ ][$bar.dots]",
             eval.Serialize());
 }
 
-TEST(Lexer, Error) {
-  Lexer lexer("foo$\nbad $");
+TEST_F(LexerTest, Error) {
+  Lexer lexer(&arena_, "foo$\nbad $");
   EvalString eval;
   string err;
   ASSERT_FALSE(lexer.ReadVarValue(&eval, &err));
@@ -79,17 +83,17 @@ TEST(Lexer, Error) {
             , err);
 }
 
-TEST(Lexer, CommentEOF) {
+TEST_F(LexerTest, CommentEOF) {
   // Verify we don't run off the end of the string when the EOF is
   // mid-comment.
-  Lexer lexer("# foo");
+  Lexer lexer(&arena_, "# foo");
   Lexer::Token token = lexer.ReadToken();
   EXPECT_EQ(Lexer::ERROR, token);
 }
 
-TEST(Lexer, Tabs) {
+TEST_F(LexerTest, Tabs) {
   // Verify we print a useful error on a disallowed character.
-  Lexer lexer("   \tfoobar");
+  Lexer lexer(&arena_, "   \tfoobar");
   Lexer::Token token = lexer.ReadToken();
   EXPECT_EQ(Lexer::INDENT, token);
   token = lexer.ReadToken();

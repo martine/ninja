@@ -530,7 +530,8 @@ n.newline()
 
 n.comment('Core source files all build into ninja library.')
 objs.extend(re2c_objs)
-for name in ['build',
+for name in ['arena',
+             'build',
              'build_log',
              'clean',
              'clparser',
@@ -632,6 +633,7 @@ if gtest_src_dir:
         test_variables += [('pdb', 'ninja_test.pdb')]
 
     test_names = [
+        'arena_test',
         'build_log_test',
         'build_test',
         'clean_test',

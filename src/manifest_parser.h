@@ -20,6 +20,8 @@
 #include <memory>
 #include <vector>
 
+#include "arena.h"
+
 struct BindingEnv;
 struct EvalString;
 
@@ -70,6 +72,7 @@ private:
   // ins_/out_/validations_ are reused across invocations to ParseEdge(),
   // to save on the otherwise constant memory reallocation.
   // subparser_ is reused solely to get better reuse out ins_/outs_/validation_.
+  Arena arena_;
   std::unique_ptr<ManifestParser> subparser_;
   std::vector<EvalString> ins_, outs_, validations_;
 };

@@ -31,8 +31,10 @@ void BindingEnv::AddBinding(const string& key, const string& val) {
   bindings_[key] = val;
 }
 
-void BindingEnv::AddRule(const Rule* rule) {
+void BindingEnv::AddRule(Rule* rule) {
   assert(LookupRuleCurrentScope(rule->name()) == NULL);
+  // The EvalString needs to live for longer than the parser.
+  rule->ReparentIntoArena(&arena_);
   rules_[rule->name()] = rule;
 }
 
@@ -78,6 +80,16 @@ bool Rule::IsReservedBinding(const string& var) {
       var == "msvc_deps_prefix";
 }
 
+void Rule::ReparentIntoArena(Arena* arena) {
+  for (auto &key_and_value : bindings_) {
+    EvalString &value = key_and_value.second;
+    for (auto it = value.parsed_.begin(); it != value.parsed_.end(); ++it) {
+      it->first = arena->PersistStringPiece(it->first);
+    }
+    value.single_token_ = arena->PersistStringPiece(value.single_token_);
+  }
+}
+
 const map<string, const Rule*>& BindingEnv::GetRules() const {
   return rules_;
 }
@@ -100,27 +112,34 @@ string BindingEnv::LookupWithFallback(const string& var,
 
 string EvalString::Evaluate(Env* env) const {
   if (parsed_.empty()) {
-    return single_token_;
+    return single_token_.AsString();
   }
 
   string result;
   for (TokenList::const_iterator i = parsed_.begin(); i != parsed_.end(); ++i) {
     if (i->second == RAW)
-      result.append(i->first);
+      result.append(i->first.begin(), i->first.end());
     else
-      result.append(env->LookupVariable(i->first));
+      result.append(env->LookupVariable(i->first.AsString()));
   }
   return result;
 }
 
 void EvalString::AddText(StringPiece text) {
   if (parsed_.empty()) {
-    single_token_.append(text.begin(), text.end());
-  } else if (!parsed_.empty() && parsed_.back().second == RAW) {
-    parsed_.back().first.append(text.begin(), text.end());
-  } else {
-    parsed_.push_back(std::make_pair(text.AsString(), RAW));
+    if (!single_token_.empty()) {
+      // Going from one to two tokens, so we can no longer apply
+      // our single_token_ optimization and need to push everything
+      // onto the vector.
+      parsed_.push_back(std::make_pair(single_token_, RAW));
+    } else {
+      // This is the first (nonempty) token, so we don't need to
+      // allocate anything on the vector (yet).
+      single_token_ = text;
+      return;
+    }
   }
+  parsed_.push_back(make_pair(text, RAW));
 }
 
 void EvalString::AddSpecial(StringPiece text) {
@@ -130,14 +149,14 @@ void EvalString::AddSpecial(StringPiece text) {
     // onto the vector.
     parsed_.push_back(std::make_pair(std::move(single_token_), RAW));
   }
-  parsed_.push_back(std::make_pair(text.AsString(), SPECIAL));
+  parsed_.push_back(std::make_pair(text, SPECIAL));
 }
 
 string EvalString::Serialize() const {
   string result;
   if (parsed_.empty() && !single_token_.empty()) {
     result.append("[");
-    result.append(single_token_);
+    result.append(single_token_.AsString());
     result.append("]");
   } else {
     for (const auto& pair : parsed_) {

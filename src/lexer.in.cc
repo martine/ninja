@@ -60,7 +60,7 @@ bool Lexer::Error(const string& message, string* err) {
   return false;
 }
 
-Lexer::Lexer(const char* input) {
+Lexer::Lexer(Arena* arena, const char* input) : arena_(arena) {
   Start("input", input);
 }
 
@@ -214,7 +214,7 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
     start = p;
     /*!re2c
     [^$ :\r\n|\000]+ {
-      eval->AddText(StringPiece(start, p - start));
+      eval->AddText(arena_->PersistStringPiece(StringPiece(start, p - start)));
       continue;
     }
     "\r\n" {
@@ -229,7 +229,7 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
       } else {
         if (*start == '\n')
           break;
-        eval->AddText(StringPiece(start, 1));
+        eval->AddText(arena_->PersistStringPiece(StringPiece(start, 1)));
         continue;
       }
     }
@@ -248,11 +248,11 @@ bool Lexer::ReadEvalString(EvalString* eval, bool path, string* err) {
       continue;
     }
     "${"varname"}" {
-      eval->AddSpecial(StringPiece(start + 2, p - start - 3));
+      eval->AddSpecial(arena_->PersistStringPiece(StringPiece(start + 2, p - start - 3)));
       continue;
     }
     "$"simple_varname {
-      eval->AddSpecial(StringPiece(start + 1, p - start - 1));
+      eval->AddSpecial(arena_->PersistStringPiece(StringPiece(start + 1, p - start - 1)));
       continue;
     }
     "$:" {

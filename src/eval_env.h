@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "arena.h"
 #include "string_piece.h"
 
 struct Rule;
@@ -39,7 +40,7 @@ struct EvalString {
   /// @return The string with variables not expanded.
   std::string Unparse() const;
 
-  void Clear() { parsed_.clear(); single_token_.clear(); }
+  void Clear() { parsed_.clear(); single_token_ = StringPiece(); }
   bool empty() const { return parsed_.empty() && single_token_.empty(); }
 
   void AddText(StringPiece text);
@@ -49,16 +50,16 @@ struct EvalString {
   /// for use in tests.
   std::string Serialize() const;
 
-private:
+public:
   enum TokenType { RAW, SPECIAL };
-  typedef std::vector<std::pair<std::string, TokenType> > TokenList;
+  typedef std::vector<std::pair<StringPiece, TokenType> > TokenList;
   TokenList parsed_;
 
   // If we hold only a single RAW token, then we keep it here instead of
   // pushing it on TokenList. This saves a bunch of allocations for
   // what is a common case. If parsed_ is nonempty, then this value
   // must be ignored.
-  std::string single_token_;
+  StringPiece single_token_;
 };
 
 /// An invocable build command and associated metadata (description, etc.).
@@ -72,6 +73,8 @@ struct Rule {
   static bool IsReservedBinding(const std::string& var);
 
   const EvalString* GetBinding(const std::string& key) const;
+
+  void ReparentIntoArena(Arena* arena);
 
  private:
   // Allow the parsers to reach into this object and fill out its fields.
@@ -91,7 +94,7 @@ struct BindingEnv : public Env {
   virtual ~BindingEnv() {}
   virtual std::string LookupVariable(const std::string& var);
 
-  void AddRule(const Rule* rule);
+  void AddRule(Rule* rule);  // Takes ownership of the EvalStrings in the rule.
   const Rule* LookupRule(const std::string& rule_name);
   const Rule* LookupRuleCurrentScope(const std::string& rule_name);
   const std::map<std::string, const Rule*>& GetRules() const;
@@ -110,6 +113,7 @@ private:
   std::map<std::string, std::string> bindings_;
   std::map<std::string, const Rule*> rules_;
   BindingEnv* parent_;
+  Arena arena_;  // Holds EvalStrings used in Rules.
 };
 
 #endif  // NINJA_EVAL_ENV_H_

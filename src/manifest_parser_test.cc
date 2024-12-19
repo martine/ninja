@@ -53,7 +53,7 @@ TEST_F(ParserTest, Rules) {
   ASSERT_EQ(3u, state.bindings_.GetRules().size());
   const Rule* rule = state.bindings_.GetRules().begin()->second;
   EXPECT_EQ("cat", rule->name());
-  EXPECT_EQ("[cat ][$in][ > ][$out]",
+  EXPECT_EQ("[cat][ ][$in][ ][>][ ][$out]",
             rule->GetBinding("command")->Serialize());
 }
 
@@ -119,7 +119,7 @@ TEST_F(ParserTest, ResponseFiles) {
   ASSERT_EQ(2u, state.bindings_.GetRules().size());
   const Rule* rule = state.bindings_.GetRules().begin()->second;
   EXPECT_EQ("cat_rsp", rule->name());
-  EXPECT_EQ("[cat ][$rspfile][ > ][$out]",
+  EXPECT_EQ("[cat][ ][$rspfile][ ][>][ ][$out]",
             rule->GetBinding("command")->Serialize());
   EXPECT_EQ("[$rspfile]", rule->GetBinding("rspfile")->Serialize());
   EXPECT_EQ("[$in]", rule->GetBinding("rspfile_content")->Serialize());
@@ -136,7 +136,7 @@ TEST_F(ParserTest, InNewline) {
   ASSERT_EQ(2u, state.bindings_.GetRules().size());
   const Rule* rule = state.bindings_.GetRules().begin()->second;
   EXPECT_EQ("cat_rsp", rule->name());
-  EXPECT_EQ("[cat ][$in_newline][ > ][$out]",
+  EXPECT_EQ("[cat][ ][$in_newline][ ][>][ ][$out]",
             rule->GetBinding("command")->Serialize());
 
   Edge* edge = state.edges_[0];
@@ -197,7 +197,7 @@ TEST_F(ParserTest, Continuation) {
   ASSERT_EQ(2u, state.bindings_.GetRules().size());
   const Rule* rule = state.bindings_.GetRules().begin()->second;
   EXPECT_EQ("link", rule->name());
-  EXPECT_EQ("[foo bar baz]", rule->GetBinding("command")->Serialize());
+  EXPECT_EQ("[foo][ ][bar][ ][baz]", rule->GetBinding("command")->Serialize());
 }
 
 TEST_F(ParserTest, Backslash) {

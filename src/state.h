@@ -95,7 +95,7 @@ struct Pool {
 struct State {
   static Pool kDefaultPool;
   static Pool kConsolePool;
-  static const Rule kPhonyRule;
+  static Rule kPhonyRule;
 
   State();
 
