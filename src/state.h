@@ -15,6 +15,9 @@
 #ifndef NINJA_STATE_H_
 #define NINJA_STATE_H_
 
+#ifdef _WIN32
+#include <list>
+#endif  // _WIN32
 #include <map>
 #include <set>
 #include <string>
@@ -130,7 +133,18 @@ struct State {
 
   /// Mapping of path -> Node.
   typedef ExternalStringHashMap<Node*>::Type Paths;
+#ifdef _WIN32
+  mutable Paths paths_;
+#else
   Paths paths_;
+#endif  // _WIN32
+#ifdef _WIN32
+  /// Storage of lowercase versions and othe case insensitive versions of the
+  /// paths that are put into paths_. Using list instead of vector to assure
+  /// the strings are not reallocated when adding more strings, as that would
+  /// destroy the StringPieces used in paths_.
+  mutable list<string> path_storage_;
+#endif  // _WIN32
 
   /// All the pools used in the graph.
   std::map<std::string, Pool*> pools_;

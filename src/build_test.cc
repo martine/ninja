@@ -2679,6 +2679,94 @@ TEST_F(BuildWithDepsLogTest, ObsoleteDeps) {
   }
 }
 
+#ifdef _WIN32
+/// cl.exe sometimes reports deps with lowercase. Make sure a mix of
+/// correct casing and lowercase works.
+TEST_F(BuildWithDepsLogTest, CaseInsensitiveOnWindows) {
+  string err;
+  // Note: in1 and in2 were created by the superclass SetUp().
+  const char* manifest =
+      "build out: cat in1 || ExtraDep\n"
+      "  deps = gcc\n"
+      "  depfile = in1.d\n"
+      "build ExtraDep: cat in2\n";
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    // Run the build once, everything should be ok.
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.OpenForWrite("ninja_deps", &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_);
+    builder.command_runner_.reset(&command_runner_);
+    EXPECT_TRUE(builder.AddTarget("out", &err));
+    ASSERT_EQ("", err);
+    fs_.Create("in1.d", "out: eXTRADep");
+    EXPECT_TRUE(builder.Build(&err));
+    EXPECT_EQ("", err);
+
+    // Both ExtraDep and out should have been produced.
+    EXPECT_EQ(2u, command_runner_.commands_ran_.size());
+    // The deps file should have been removed.
+    EXPECT_EQ(0, fs_.Stat("in1.d", &err));
+    // Recreate it for the next step.
+    fs_.Create("in1.d", "out: eXTRADep");
+    deps_log.Close();
+    builder.command_runner_.release();
+  }
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    // If not changing anything, nothing should rebuild.
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.Load("ninja_deps", &state, &err));
+    ASSERT_TRUE(deps_log.OpenForWrite("ninja_deps", &err));
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_);
+    EXPECT_TRUE(builder.AddTarget("out", &err));
+    ASSERT_EQ("", err);
+    ASSERT_TRUE(builder.AlreadyUpToDate());
+
+    deps_log.Close();
+  }
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AddCatRule(&state));
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    // Touch the in2 that touches ExtraDep that is mentioned in the deps.
+    fs_.Tick();
+    fs_.Create("in2", "");
+
+    // Run the build again.
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.Load("ninja_deps", &state, &err));
+    ASSERT_TRUE(deps_log.OpenForWrite("ninja_deps", &err));
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_);
+    builder.command_runner_.reset(&command_runner_);
+    command_runner_.commands_ran_.clear();
+    EXPECT_TRUE(builder.AddTarget("out", &err));
+    ASSERT_EQ("", err);
+    EXPECT_TRUE(builder.Build(&err));
+    EXPECT_EQ("", err);
+
+    // We should have rebuilt the output due to in2 being
+    // out of date.
+    EXPECT_EQ(2u, command_runner_.commands_ran_.size());
+
+    builder.command_runner_.release();
+  }
+}
+#endif  // _WIN32
+
 TEST_F(BuildWithDepsLogTest, DepsIgnoredInDryRun) {
   const char* manifest =
       "build out: cat in1\n"

@@ -14,6 +14,8 @@
 
 #include "state.h"
 
+#include <algorithm>
+
 #include <assert.h>
 #include <stdio.h>
 
@@ -99,6 +101,13 @@ Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
     return node;
   node = new Node(path.AsString(), slash_bits);
   paths_[node->path()] = node;
+#ifdef _WIN32
+  // Also store as lowercase.
+  string lowerpath = node->path();
+  transform(lowerpath.begin(), lowerpath.end(), lowerpath.begin(), ::tolower);
+  path_storage_.push_back(lowerpath);
+  paths_[path_storage_.back()] = node;
+#endif  // _Win32
   return node;
 }
 
@@ -106,6 +115,17 @@ Node* State::LookupNode(StringPiece path) const {
   Paths::const_iterator i = paths_.find(path);
   if (i != paths_.end())
     return i->second;
+#ifdef _WIN32
+  string lowerpath = path.AsString();
+  transform(lowerpath.begin(), lowerpath.end(), lowerpath.begin(), ::tolower);
+  i = paths_.find(lowerpath);
+  if (i != paths_.end()) {
+    // Cache this casing of the path as well
+    path_storage_.push_back(path.AsString());
+    paths_[path_storage_.back()] = i->second;
+    return i->second;
+  }
+#endif  // _WIN32
   return NULL;
 }
 
