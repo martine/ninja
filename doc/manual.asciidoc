@@ -1078,16 +1078,22 @@ the output to rebuild, even though it doesn't show up in the arguments.
 Note that dependencies as loaded through depfiles have slightly different
 semantics, as described in the <<ref_rule,rule reference>>.
 
-3. _Order-only dependencies_, expressed with the syntax +|| _dep1_
-   _dep2_+ on the end of a build line.  When these are out of date, the
-   output is not rebuilt until they are built, but changes in order-only
-   dependencies alone do not cause the output to be rebuilt.
+3. _Order-only dependencies_, expressed with the syntax
+   +build output: ... || _dep1_ _dep2_+ on the end of a build line.
+   When these are out of date, +output+ is not rebuilt until they
+   are built, but changes in order-only dependencies _alone_ do not cause
+   +output+ to be rebuilt.
 +
 Order-only dependencies can be useful for bootstrapping dependencies
-that are only discovered during build time: for example, to generate a
-header file before starting a subsequent compilation step.  (Once the
-header is used in compilation, a generated dependency file will then
-express the implicit dependency.)
+that are only discovered during build time: for example, to generate
+header files that the compiler may or may not need depending on the
+project's configuration. Once the compiler can run, a generated
+dependency file will then express real headers usage with implicit
+dependencies.
++
+Compared with an implicit dependency, the order-only dependency example
+above can save rebuilding +output+. However it does not save rebuilding
+out of date +dep1+ and +dep2+.
 
 File paths are compared as is, which means that an absolute path and a
 relative path, pointing to the same file, are considered different by Ninja.
