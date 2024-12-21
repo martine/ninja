@@ -27,6 +27,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #ifndef _WIN32
 #include <inttypes.h>
@@ -373,13 +375,8 @@ bool BuildLog::Recompact(const std::string& path, const BuildLogUser& user,
     entries_.erase(output);
 
   fclose(f);
-  if (unlink(path.c_str()) < 0) {
-    *err = strerror(errno);
-    return false;
-  }
 
-  if (rename(temp_path.c_str(), path.c_str()) < 0) {
-    *err = strerror(errno);
+  if (!ReplaceContent(path, temp_path, err)) {
     return false;
   }
 

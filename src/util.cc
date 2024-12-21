@@ -37,6 +37,8 @@
 #ifndef _WIN32
 #include <unistd.h>
 #include <sys/time.h>
+#else
+#include <windows.h>
 #endif
 
 #include <vector>
@@ -948,5 +950,48 @@ bool Truncate(const string& path, size_t size, string* err) {
     *err = strerror(errno);
     return false;
   }
+  return true;
+}
+
+bool ReplaceContent(const string& file_dst, const string& new_content,
+                    string* err) {
+#ifdef _WIN32
+  if (!DeleteFile(file_dst.c_str())) {
+    *err = GetLastErrorString();
+    return false;
+  }
+
+  if (rename(new_content.c_str(), file_dst.c_str()) < 0) {
+    *err = strerror(errno);
+    return false;
+  }
+#else
+  struct stat old_file;
+  bool found_uid_gid = true;
+
+  if (stat(file_dst.c_str(), &old_file) < 0) {
+    found_uid_gid = false;
+  }
+
+  if (unlink(file_dst.c_str()) < 0) {
+    *err = strerror(errno);
+    return false;
+  }
+
+  if (rename(new_content.c_str(), file_dst.c_str()) < 0) {
+    *err = strerror(errno);
+    return false;
+  }
+
+  // apply uid and gid again so we always stay as the uid and gid of the first
+  // ninja invocation that created the file at file_dst
+  if (found_uid_gid) {
+    if (chown(file_dst.c_str(), old_file.st_uid, old_file.st_gid)) {
+      Warning("Reapplying previous uid and gid failed with: %s uid: %d gid: %d",
+              strerror(errno), old_file.st_uid, old_file.st_gid);
+    }
+  }
+#endif
+
   return true;
 }
