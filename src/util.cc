@@ -908,6 +908,36 @@ double GetLoadAverage() {
 }
 #else
 double GetLoadAverage() {
+# if defined(__linux__)
+  // Only try to open the file once.
+  static int fd = -1;
+  if (fd == -1) {
+    fd = open("/proc/loadavg", O_RDONLY);
+    if (fd < 0) {
+      fd = -2;
+    }
+  }
+
+  if (fd >= 0) {
+    char buf[65], *p;
+    ssize_t nbr = pread(fd, buf, sizeof(buf) - 1, 0);
+    // Load average should be at least "1 5 9 n/", where we want the "n".
+    if (nbr > 7) {
+      buf[nbr] = '\0';
+      p = strchr(buf, ' ');
+      if (p) {
+        p = strchr(p + 1, ' ');
+      }
+      if (p) {
+        p = strchr(p + 1, ' ');
+      }
+      if (p && (unsigned(p[1]) - '0' <= 9)) {
+        return atoi(p + 1);
+      }
+    }
+  }
+# endif
+
   double loadavg[3] = { 0.0f, 0.0f, 0.0f };
   if (getloadavg(loadavg, 3) < 0) {
     // Maybe we should return an error here or the availability of
