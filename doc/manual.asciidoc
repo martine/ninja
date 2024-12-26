@@ -1256,6 +1256,7 @@ as follows:
 ----
 rule f95
   command = f95 -o $out -c $in
+  restat = 1
 rule fscan
   command = fscan -o $out $in
 
@@ -1281,7 +1282,8 @@ build bar.o: dyndep |  foo.mod
 Ninja will load this file to add `foo.mod` as an implicit output of
 `foo.o` and implicit input of `bar.o`.  This ensures that the Fortran
 sources are always compiled in the proper order and recompiled when
-needed.
+needed. The `restat = 1` is needed because
+https://github.com/ninja-build/ninja/pull/2275[the fortran compiler does not update the timestamp of the module files if they already exist].
 
 Tarball Extraction
 ^^^^^^^^^^^^^^^^^^
