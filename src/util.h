@@ -48,6 +48,11 @@ NORETURN void Fatal(const char* msg, ...);
 #  define NINJA_FALLTHROUGH // nothing
 #endif
 
+///Define max filename size. Limit on ecrypt fs is 144 so 140 should be safe
+#define MAX_FILENAME_SIZE 140
+///Len of the hash that fill up the oversized filename
+#define HASH_SIZE_LEN 8
+
 /// Log a warning message.
 void Warning(const char* msg, ...);
 void Warning(const char* msg, va_list ap);
@@ -136,4 +141,9 @@ inline To FunctionCast(From from) {
 }
 #endif
 
+// Helper function to compute a simple hash
+unsigned int simpleHash(const char* str);
+
+// Method to check and truncate file names if necessary
+int checkFileName(const char* inPath, char* outPath);
 #endif  // NINJA_UTIL_H_

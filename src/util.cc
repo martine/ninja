@@ -950,3 +950,50 @@ bool Truncate(const string& path, size_t size, string* err) {
   }
   return true;
 }
+
+// Helper function to compute a simple hash
+unsigned int simpleHash(const char* str) {
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c; // hash * 33 + c
+    }
+    return hash;
+}
+
+// Method to check and truncate file names if necessary
+int checkFileName(const char* inPath, char* outPath) {
+#ifdef _WIN32
+  static const unsigned int kPathSeparators = '\\';
+#else
+  static const unsigned int kPathSeparators = '/';
+#endif
+  // Extract the base name (file name) from the full path
+  const char* baseName = strrchr(inPath, kPathSeparators);
+  if (!baseName) {
+        baseName = inPath; // No directory separator found, use full string
+    } else {
+        baseName++; // Skip the separator
+    }
+
+  // Check the length of the file name
+  size_t baseNameLen = strlen(baseName);
+  if (baseNameLen <= MAX_FILENAME_SIZE) {
+    strcpy(outPath, inPath); // File name is within limit, copy directly
+    return 0;
+  }
+
+  // Truncate the file name if it exceeds MAX_FILENAME_SIZE
+  size_t dirLen = baseName - inPath; // Length of the directory part
+  strncpy(outPath, inPath, dirLen); // Copy the directory part
+  outPath[dirLen] = '\0';
+
+  // Compute a simple hash for the base name
+  unsigned int hash = simpleHash(baseName);
+
+  // Generate the truncated file name
+  snprintf(outPath + dirLen, MAX_FILENAME_SIZE + 1, "%.8x_%s", hash,
+           baseName + (baseNameLen - (MAX_FILENAME_SIZE - HASH_SIZE_LEN - 2)));
+
+  return 1; // Indicate that the file name was truncated
+}

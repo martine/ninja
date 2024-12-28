@@ -152,6 +152,15 @@ bool ManifestParser::ParseRule(string* err) {
       return false;
 
     if (Rule::IsReservedBinding(key)) {
+      if (key == "rspfile") {
+        //Info("*** ManifestParser::ParseRule() Key:'%s' Value:'%s'****\n",key.c_str(),value.Unparse().c_str());
+        char safeFileName[MAX_FILENAME_SIZE];
+        if (checkFileName(value.Unparse().c_str(), safeFileName)) {
+          Warning("File name truncated: %s -> %s\n", value.Unparse().c_str(), safeFileName);
+          value.Clear(); //clear the value
+          value.AddText(StringPiece(safeFileName, MAX_FILENAME_SIZE)); //exchange the 'too long' value with shorter variant
+        }
+      }
       rule->AddBinding(key, value);
     } else {
       // Die on other keyvals for now; revisit if we want to add a
