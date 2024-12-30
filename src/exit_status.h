@@ -15,10 +15,19 @@
 #ifndef NINJA_EXIT_STATUS_H_
 #define NINJA_EXIT_STATUS_H_
 
-enum ExitStatus {
-  ExitSuccess,
+// The underlying type of the ExitStatus enum, used to represent a platform-specific
+// process exit code.
+#ifdef _WIN32
+#define EXIT_STATUS_TYPE unsigned long
+#else  // !_WIN32
+#define EXIT_STATUS_TYPE int
+#endif  // !_WIN32
+
+
+enum ExitStatus : EXIT_STATUS_TYPE {
+  ExitSuccess=0,
   ExitFailure,
-  ExitInterrupted
+  ExitInterrupted=130,
 };
 
 #endif  // NINJA_EXIT_STATUS_H_

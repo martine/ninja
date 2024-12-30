@@ -152,14 +152,18 @@ class Output(unittest.TestCase):
         '',
     ))
 
-    def _test_expected_error(self, plan: str, flags: T.Optional[str], expected: str):
+    def _test_expected_error(self, plan: str, flags: T.Optional[str],expected: str,
+                             *args, exit_code: T.Optional[int]=None, **kwargs)->None:
         """Run Ninja with a given plan and flags, and verify its cooked output against an expected content.
+        All *args and **kwargs are passed to the `run` function
         """
         actual = ''
-        try:
-          actual = run(plan, flags, print_err_output=False)
-        except subprocess.CalledProcessError as err:
-          actual = err.cooked_output
+        kwargs['print_err_output'] = False
+        with self.assertRaises(subprocess.CalledProcessError) as cm:
+            run(plan, flags, *args,  **kwargs)
+        actual = cm.exception.cooked_output
+        if exit_code is not None:
+            self.assertEqual(cm.exception.returncode, exit_code)
         self.assertEqual(expected, actual)
 
     def test_issue_1418(self) -> None:
@@ -280,6 +284,75 @@ build zoo: touch bar
                 )
             except subprocess.CalledProcessError as err:
                 self.fail("non-zero exit code with: " + err.output)
+
+    def test_pr_2540(self)->None:
+        py = sys.executable
+        plan = f'''\
+rule CUSTOM_COMMAND
+  command = $COMMAND
+
+build 124: CUSTOM_COMMAND
+  COMMAND = {py} -c 'exit(124)'
+
+build 127: CUSTOM_COMMAND
+  COMMAND = {py} -c 'exit(127)'
+
+build 130: CUSTOM_COMMAND
+  COMMAND = {py} -c 'exit(130)'
+
+build 137: CUSTOM_COMMAND
+  COMMAND = {py} -c 'exit(137)'
+
+build success: CUSTOM_COMMAND
+  COMMAND = sleep 0.3; echo success
+'''
+        # Disable colors
+        env = default_env.copy()
+        env['TERM'] = 'dumb'
+        self._test_expected_error(
+            plan, '124',
+            f'''[1/1] {py} -c 'exit(124)'
+FAILED: [code=124] 124 \n{py} -c 'exit(124)'
+ninja: build stopped: subcommand failed.
+''',
+            exit_code=124, env=env,
+        )
+        self._test_expected_error(
+            plan, '127',
+            f'''[1/1] {py} -c 'exit(127)'
+FAILED: [code=127] 127 \n{py} -c 'exit(127)'
+ninja: build stopped: subcommand failed.
+''',
+            exit_code=127, env=env,
+        )
+        self._test_expected_error(
+            plan, '130',
+            'ninja: build stopped: interrupted by user.\n',
+            exit_code=130, env=env,
+        )
+        self._test_expected_error(
+            plan, '137',
+            f'''[1/1] {py} -c 'exit(137)'
+FAILED: [code=137] 137 \n{py} -c 'exit(137)'
+ninja: build stopped: subcommand failed.
+''',
+            exit_code=137, env=env,
+        )
+        self._test_expected_error(
+            plan, 'non-existent-target',
+            "ninja: error: unknown target 'non-existent-target'\n",
+            exit_code=1, env=env,
+        )
+        self._test_expected_error(
+            plan, '-j2 success 127',
+            f'''[1/2] {py} -c 'exit(127)'
+FAILED: [code=127] 127 \n{py} -c 'exit(127)'
+[2/2] sleep 0.3; echo success
+success
+ninja: build stopped: subcommand failed.
+''',
+            exit_code=127, env=env,
+        )
 
     def test_depfile_directory_creation(self) -> None:
         b = BuildDir('''\

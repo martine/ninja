@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "exit_status.h"
 #include "subprocess.h"
 
 #include <assert.h>
@@ -198,9 +199,8 @@ ExitStatus Subprocess::Finish() {
   CloseHandle(child_);
   child_ = NULL;
 
-  return exit_code == 0              ? ExitSuccess :
-         exit_code == CONTROL_C_EXIT ? ExitInterrupted :
-                                       ExitFailure;
+  return exit_code == CONTROL_C_EXIT ? ExitInterrupted :
+                                       static_cast<ExitStatus>(exit_code);
 }
 
 bool Subprocess::Done() const {

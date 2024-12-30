@@ -209,9 +209,9 @@ struct Builder {
   /// Returns true if the build targets are already up to date.
   bool AlreadyUpToDate() const;
 
-  /// Run the build.  Returns false on error.
+  /// Run the build.  Returns ExitStatus or the exit code of the last failed job.
   /// It is an error to call this function when AlreadyUpToDate() is true.
-  bool Build(std::string* err);
+  ExitStatus Build(std::string* err);
 
   bool StartEdge(Edge* edge, std::string* err);
 
@@ -233,6 +233,10 @@ struct Builder {
   std::unique_ptr<CommandRunner> command_runner_;
   Status* status_;
 
+  /// Returns ExitStatus or the exit code of the last failed job
+  /// (doesn't need to be an enum value of ExitStatus)
+  ExitStatus GetExitCode() const { return exit_code_; }
+
  private:
   bool ExtractDeps(CommandRunner::Result* result, const std::string& deps_type,
                    const std::string& deps_prefix,
@@ -252,6 +256,10 @@ struct Builder {
   std::unique_ptr<Explanations> explanations_;
 
   DependencyScan scan_;
+
+  /// Keep the global exit code for the build
+  ExitStatus exit_code_ = ExitSuccess;
+  void SetFailureCode(ExitStatus code);
 
   // Unimplemented copy ctor and operator= ensure we don't copy the auto_ptr.
   Builder(const Builder &other);        // DO NOT IMPLEMENT

@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <queue>
 
+#include "exit_status.h"
 #include "explanations.h"
 #include "line_printer.h"
 #include "status.h"
@@ -31,7 +32,7 @@ struct StatusPrinter : Status {
 
   void BuildEdgeStarted(const Edge* edge, int64_t start_time_millis) override;
   void BuildEdgeFinished(Edge* edge, int64_t start_time_millis,
-                                 int64_t end_time_millis, bool success,
+                                 int64_t end_time_millis, ExitStatus exit_code,
                                  const std::string& output) override;
   void BuildStarted() override;
   void BuildFinished() override;
