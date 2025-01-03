@@ -1,0 +1,152 @@
+name: ci-linux-musl
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04 # needs to be ubuntu-24.04 for qemu-user-static loongarch64 support
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        build_method: ["python", "cmake"]
+        arch:
+          [
+            aarch64-linux-musl,
+            arm-linux-musleabi,
+            arm-linux-musleabihf,
+            armv6-linux-musleabihf,
+            armv7l-linux-musleabihf,
+            i686-linux-musl,
+            x86_64-linux-musl,
+            mips-linux-musl,
+            mips64-linux-musl,
+            mips64el-linux-musl,
+            mipsel-linux-musl,
+            powerpc-linux-musl,
+            powerpc64le-linux-musl,
+            s390x-linux-musl,
+            riscv64-linux-musl,
+            loongarch64-linux-musl,
+          ]
+        include:
+          - arch: aarch64-linux-musl
+            binary_name: aarch64
+          - arch: arm-linux-musleabi
+            binary_name: armv5
+          - arch: arm-linux-musleabihf
+            binary_name: armhf
+          - arch: armv6-linux-musleabihf
+            binary_name: armv6
+          - arch: armv7l-linux-musleabihf
+            binary_name: armv7
+          - arch: i686-linux-musl
+            binary_name: x86
+          - arch: x86_64-linux-musl
+            binary_name: x86_64
+          - arch: mips-linux-musl
+            binary_name: mips
+          - arch: mips64-linux-musl
+            binary_name: mips64
+          - arch: mips64el-linux-musl
+            binary_name: mips64el
+          - arch: mipsel-linux-musl
+            binary_name: mipsel
+          - arch: powerpc-linux-musl
+            binary_name: powerpc
+          - arch: powerpc64le-linux-musl
+            binary_name: powerpc64le
+          - arch: s390x-linux-musl
+            binary_name: s390x
+          - arch: riscv64-linux-musl
+            binary_name: riscv64
+          - arch: loongarch64-linux-musl
+            binary_name: loongarch64
+
+    name: ${{ matrix.build_method}} ${{ matrix.arch }}
+
+    steps:
+      - name: Host - checkout
+        uses: actions/checkout@v4
+
+      - name: Host - update
+        run: sudo apt-get update
+
+      - name: Host - set up qemu-user-static binfmt-support
+        run: sudo apt-get install libpipeline1 qemu-user-static binfmt-support
+
+      - name: Host - Create docker crossbuild container
+        run: docker run --name crossbuild -it -d -e "LDFLAGS=-s -static --static" -w /home/github -v ${{ github.workspace }}:/home/github ghcr.io/userdocs/qbt-musl-cross-make:${{ matrix.arch }}
+
+      - name: Docker - Install ninja build optional dependencies
+        run: |
+          docker exec crossbuild sudo apk update
+          docker exec crossbuild sudo apk add --no-cache python3
+
+      - name: Docker - Configure ${{ matrix.binary_name }}
+        if: matrix.build_method == 'cmake'
+        run: >
+          docker exec crossbuild
+          cmake -B build
+          -D CMAKE_BUILD_TYPE="Release"
+
+      - name: Docker - Cmake Build ${{ matrix.binary_name }}
+        if: matrix.build_method == 'cmake'
+        run: docker exec crossbuild cmake --build build --parallel --config Release
+
+      - name: Docker - Cmake test ${{ matrix.binary_name }}
+        if: matrix.build_method == 'cmake'
+        run: docker exec crossbuild ./build/ninja_test --gtest_color=yes
+
+      - name: Docker - Python Build ${{ matrix.binary_name }}
+        if: matrix.build_method == 'python'
+        run: |
+          docker exec crossbuild ./configure.py --bootstrap --verbose
+          printf "%s\n" "build_suffix=-python" >> $GITHUB_ENV
+
+      - name: Docker - Python test ${{ matrix.binary_name }}
+        if: matrix.build_method == 'python'
+        run: |
+          docker exec crossbuild ./ninja all
+          docker exec crossbuild python3 misc/ninja_syntax_test.py
+          # docker exec crossbuild ./misc/output_test.py
+
+      - name: Set Build Path for Python
+        if: matrix.build_method == 'python'
+        run: echo "BUILD_PATH=${{ github.workspace }}" >> $GITHUB_ENV
+
+      - name: Set Build Path for cmake
+        if: matrix.build_method == 'cmake'
+        run: echo "BUILD_PATH=${{ github.workspace }}/build" >> $GITHUB_ENV
+
+      - name: Host - Rename ${{ matrix.binary_name }} to ${{ env.release_asset }}
+        run: mv -f ${BUILD_PATH}/ninja ninja-${{ matrix.binary_name }}${{ env.build_suffix }}
+
+      - name: Host - ninja-${{ matrix.binary_name }} --version
+        run: ./ninja-${{ matrix.binary_name }}${{ env.build_suffix }} --version >> $GITHUB_STEP_SUMMARY
+
+      - name: Host - crossbuild binary info via file
+        run: file ./ninja-${{ matrix.binary_name }}${{ env.build_suffix }} >> $GITHUB_STEP_SUMMARY
+
+      - name: Host - signed build provenance attestations
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ninja-${{ matrix.binary_name }}${{ env.build_suffix }}
+
+      - name: Upload artifact - ${{ matrix.binary_name }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ninja-${{ matrix.binary_name }}${{ env.build_suffix }}
+          path: ninja-${{ matrix.binary_name }}${{ env.build_suffix }}
