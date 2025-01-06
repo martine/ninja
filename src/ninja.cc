@@ -576,11 +576,12 @@ int NinjaMain::ToolDeps(const Options* options, int argc, char** argv) {
     TimeStamp mtime = disk_interface.Stat((*it)->path(), &err);
     if (mtime == -1)
       Error("%s", err.c_str());  // Log and ignore Stat() errors;
-    printf("%s: #deps %d, deps mtime %" PRId64 " (%s)\n",
-           (*it)->path().c_str(), deps->node_count, deps->mtime,
-           (!mtime || mtime > deps->mtime ? "STALE":"VALID"));
+    printf("# deps %d, deps mtime %" PRId64 " (%s)\n%s: \\\n",
+           deps->node_count, deps->mtime, 
+           (!mtime || mtime > deps->mtime ? "STALE":"VALID"), 
+           (*it)->path().c_str());
     for (int i = 0; i < deps->node_count; ++i)
-      printf("    %s\n", deps->nodes[i]->path().c_str());
+      printf("    %s \\\n", deps->nodes[i]->path().c_str());
     printf("\n");
   }
 
