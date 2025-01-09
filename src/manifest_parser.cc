@@ -143,31 +143,37 @@ bool ManifestParser::ParseRule(string* err) {
   if (env_->LookupRuleCurrentScope(name) != NULL)
     return lexer_.Error("duplicate rule '" + name + "'", err);
 
-  Rule* rule = new Rule(name);  // XXX scoped_ptr
+  Rule* rule = new Rule(name);
 
   while (lexer_.PeekToken(Lexer::INDENT)) {
     string key;
     EvalString value;
-    if (!ParseLet(&key, &value, err))
+    if (!ParseLet(&key, &value, err)) {
+      delete rule;
       return false;
+    }
 
     if (Rule::IsReservedBinding(key)) {
       rule->AddBinding(key, value);
     } else {
       // Die on other keyvals for now; revisit if we want to add a
       // scope here.
+      delete rule;
       return lexer_.Error("unexpected variable '" + key + "'", err);
     }
   }
 
   if (rule->bindings_["rspfile"].empty() !=
       rule->bindings_["rspfile_content"].empty()) {
+    delete rule;
     return lexer_.Error("rspfile and rspfile_content need to be "
                         "both specified", err);
   }
 
-  if (rule->bindings_["command"].empty())
+  if (rule->bindings_["command"].empty()) {
+    delete rule;
     return lexer_.Error("expected 'command =' line", err);
+  }
 
   env_->AddRule(rule);
   return true;
