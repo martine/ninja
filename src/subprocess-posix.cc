@@ -248,14 +248,38 @@ Subprocess *SubprocessSet::Add(const string& command, bool use_console) {
   return subprocess;
 }
 
-#ifdef USE_PPOLL
 bool SubprocessSet::DoWork() {
-  vector<pollfd> fds;
+  WorkResult ret = DoWork(-1);
+  return ret == WorkResult::INTERRUPTION;
+}
+
+// An optional timespec struct value for pselect() or ppoll(). Usage:
+// - Create instance, pass timeout in milliseconds.
+// - Call ptr() tp get the pointer to pass to pselect() or ppoll().
+struct TimeoutHelper {
+  // Constructor. A negative timeout_ms value means no timeout.
+  TimeoutHelper(int64_t timeout_ms) {
+    if (timeout_ms >= 0) {
+      ts_.tv_sec = static_cast<long>(timeout_ms / 1000);
+      ts_.tv_nsec = static_cast<long>((timeout_ms % 1000) * 1000000L);
+      ptr_ = &ts_;
+    }
+  }
+
+  const struct timespec* ptr() const { return ptr_; }
+
+ private:
+  struct timespec ts_ {};
+  const struct timespec* ptr_ = nullptr;
+};
+
+#ifdef USE_PPOLL
+SubprocessSet::WorkResult SubprocessSet::DoWork(int64_t timeout_millis) {
+  std::vector<pollfd> fds;
   nfds_t nfds = 0;
 
-  for (vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
+  for (const auto& proc : running_) {
+    int fd = proc->fd_;
     if (fd < 0)
       continue;
     pollfd pfd = { fd, POLLIN | POLLPRI, 0 };
@@ -264,49 +288,50 @@ bool SubprocessSet::DoWork() {
   }
 
   interrupted_ = 0;
-  int ret = ppoll(&fds.front(), nfds, NULL, &old_mask_);
+  TimeoutHelper timeout(timeout_millis);
+  int ret = ppoll(&fds.front(), nfds, timeout.ptr(), &old_mask_);
+  if (ret == 0) {
+    return WorkResult::TIMEOUT;
+  }
   if (ret == -1) {
     if (errno != EINTR) {
-      perror("ninja: ppoll");
-      return false;
+      Fatal("ppoll", strerror(errno));
     }
-    return IsInterrupted();
+    return IsInterrupted() ? WorkResult::INTERRUPTION : WorkResult::COMPLETION;
   }
 
   HandlePendingInterruption();
   if (IsInterrupted())
-    return true;
+    return WorkResult::INTERRUPTION;
 
   nfds_t cur_nfd = 0;
-  for (vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ) {
-    int fd = (*i)->fd_;
+  for (auto it = running_.begin(); it != running_.end();) {
+    int fd = (*it)->fd_;
     if (fd < 0)
       continue;
     assert(fd == fds[cur_nfd].fd);
     if (fds[cur_nfd++].revents) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
+      (*it)->OnPipeReady();
+      if ((*it)->Done()) {
+        finished_.push(*it);
+        it = running_.erase(it);
         continue;
       }
     }
-    ++i;
+    ++it;
   }
 
-  return IsInterrupted();
+  return IsInterrupted() ? WorkResult::INTERRUPTION : WorkResult::COMPLETION;
 }
 
 #else  // !defined(USE_PPOLL)
-bool SubprocessSet::DoWork() {
+SubprocessSet::WorkResult SubprocessSet::DoWork(int64_t timeout_millis) {
   fd_set set;
   int nfds = 0;
   FD_ZERO(&set);
 
-  for (vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
+  for (const auto& proc : running_) {
+    int fd = proc->fd_;
     if (fd >= 0) {
       FD_SET(fd, &set);
       if (nfds < fd+1)
@@ -315,34 +340,37 @@ bool SubprocessSet::DoWork() {
   }
 
   interrupted_ = 0;
-  int ret = pselect(nfds, &set, 0, 0, 0, &old_mask_);
+  TimeoutHelper timeout(timeout_millis);
+  int ret = pselect(nfds, &set, 0, 0, timeout.ptr(), &old_mask_);
+  if (ret == 0)
+    return WorkResult::TIMEOUT;
+
   if (ret == -1) {
     if (errno != EINTR) {
-      perror("ninja: pselect");
-      return false;
+      Fatal("pselect", strerror(errno));
     }
-    return IsInterrupted();
+    return IsInterrupted() ? WorkResult::INTERRUPTION : WorkResult::COMPLETION;
   }
 
   HandlePendingInterruption();
   if (IsInterrupted())
-    return true;
+    return WorkResult::INTERRUPTION;
 
-  for (vector<Subprocess*>::iterator i = running_.begin();
-       i != running_.end(); ) {
-    int fd = (*i)->fd_;
+  for (std::vector<Subprocess*>::iterator it = running_.begin();
+       it != running_.end();) {
+    int fd = (*it)->fd_;
     if (fd >= 0 && FD_ISSET(fd, &set)) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
+      (*it)->OnPipeReady();
+      if ((*it)->Done()) {
+        finished_.push(*it);
+        it = running_.erase(it);
         continue;
       }
     }
-    ++i;
+    ++it;
   }
 
-  return IsInterrupted();
+  return IsInterrupted() ? WorkResult::INTERRUPTION : WorkResult::COMPLETION;
 }
 #endif  // !defined(USE_PPOLL)
 

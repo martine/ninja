@@ -15,9 +15,11 @@
 #ifndef NINJA_SUBPROCESS_H_
 #define NINJA_SUBPROCESS_H_
 
+#include <stdint.h>
+
+#include <queue>
 #include <string>
 #include <vector>
-#include <queue>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -83,9 +85,43 @@ struct SubprocessSet {
   SubprocessSet();
   ~SubprocessSet();
 
+  // Value returned by DoWork() method,
+  // - COMPLETION means that a process has completed.
+  // - INTERRUPTION means that user interruption happened. On Posix this means
+  //   a SIGINT, SIGHUP or SIGTERM signal. On Win32, this means Ctrl-C was
+  //   pressed.
+  // - TIMEOUT means that the called timed out.
+  enum class WorkResult {
+    COMPLETION = 0,
+    INTERRUPTION = 1,
+    TIMEOUT = 3,
+  };
+
+  // Start a new subprocess running |command|. Set |use_console| to true
+  // if the process will inherit the current console handles (terminal
+  // input and outputs on Posix). If false, the subprocess' output
+  // will be buffered instead, and available after completion.
   Subprocess* Add(const std::string& command, bool use_console = false);
+
+  // Equivalent to DoWork(-1), which returns true in case of interruption
+  // and false otherwise.
   bool DoWork();
+
+  // Wait for at most |timeout_millis| milli-seconds for either a process
+  // completion or a user-initiated interruption. If |timeout_millis| is
+  // negative, waits indefinitely, and never return WorkStatus::TIMEOUT.
+  //
+  // IMPORTANT: On Posix, spurious wakeups are possible, and will return
+  // WorkResult::COMPLETION even though no process has really
+  // completed. The caller should call NextFinished() and compare the
+  // its result to nullptr to check for this rare condition.
+  WorkResult DoWork(int64_t timeout_millis);
+
+  // Return the next Subprocess after a WorkResult::COMPLETION result.
+  // The result can be nullptr on Posix in case of spurious wakeups.
+  // NOTE: This transfers ownership of the Subprocess instance to the caller.
   Subprocess* NextFinished();
+
   void Clear();
 
   std::vector<Subprocess*> running_;

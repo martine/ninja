@@ -16,6 +16,7 @@
 #define NINJA_BUILD_H_
 
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -151,6 +152,9 @@ struct CommandRunner {
   virtual size_t CanRunMore() const = 0;
   virtual bool StartCommand(Edge* edge) = 0;
 
+  // A callable value used to refresh the current Ninja status.
+  using StatusRefresher = std::function<void(void)>;
+
   /// The result of waiting for a command.
   struct Result {
     Result() : edge(NULL) {}
@@ -166,13 +170,13 @@ struct CommandRunner {
   virtual void Abort() {}
 
   /// Creates the RealCommandRunner
-  static CommandRunner* factory(const BuildConfig& config);
+  static CommandRunner* factory(const BuildConfig& config,
+                                StatusRefresher&& refresh_status);
 };
 
 /// Options (e.g. verbosity, parallelism) passed to a build.
 struct BuildConfig {
-  BuildConfig() : verbosity(NORMAL), dry_run(false), parallelism(1),
-                  failures_allowed(1), max_load_average(-0.0f) {}
+  BuildConfig() = default;
 
   enum Verbosity {
     QUIET,  // No output -- used when testing.
@@ -180,13 +184,16 @@ struct BuildConfig {
     NORMAL,  // regular output and status update
     VERBOSE
   };
-  Verbosity verbosity;
-  bool dry_run;
-  int parallelism;
-  int failures_allowed;
+  Verbosity verbosity = NORMAL;
+  bool dry_run = false;
+  int parallelism = 1;
+  int failures_allowed = 1;
   /// The maximum load average we must not exceed. A negative value
   /// means that we do not have any limit.
-  double max_load_average;
+  double max_load_average = -0.0f;
+  /// Number of milliseconds between status refreshes in interactive
+  /// terminals.
+  int status_refresh_millis = 1000;
   DepfileParserOptions depfile_parser_options;
 };
 

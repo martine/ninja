@@ -304,13 +304,13 @@ string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
 
         // Overall finished edges per second.
       case 'o':
-        SnprintfRate(finished_edges_ / (time_millis_ / 1e3), buf, "%.1f");
+        SnprintfRate(finished_edges_ / (time_millis / 1e3), buf, "%.1f");
         out += buf;
         break;
 
         // Current rate, average over the last '-j' jobs.
       case 'c':
-        current_rate_.UpdateRate(finished_edges_, time_millis_);
+        current_rate_.UpdateRate(finished_edges_, time_millis);
         SnprintfRate(current_rate_.rate(), buf, "%.1f");
         out += buf;
         break;
@@ -336,15 +336,15 @@ string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
       case 'E':  // ETA, seconds
       case 'W':  // ETA, human-readable
       {
-        double elapsed_sec = time_millis_ / 1e3;
+        double elapsed_sec = time_millis / 1e3;
         double eta_sec = -1;  // To be printed as "?".
         if (time_predicted_percentage_ != 0.0) {
-          // So, we know that we've spent time_millis_ wall clock,
+          // So, we know that we've spent time_millis wall clock,
           // and that is time_predicted_percentage_ percent.
           // How much time will we need to complete 100%?
-          double total_wall_time = time_millis_ / time_predicted_percentage_;
+          double total_wall_time = time_millis / time_predicted_percentage_;
           // Naturally, that gives us the time remaining.
-          eta_sec = (total_wall_time - time_millis_) / 1e3;
+          eta_sec = (total_wall_time - time_millis) / 1e3;
         }
 
         const bool print_with_hours =
@@ -428,15 +428,26 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
 
   bool force_full_command = config_.verbosity == BuildConfig::VERBOSE;
 
-  string to_print = edge->GetBinding("description");
-  if (to_print.empty() || force_full_command)
-    to_print = edge->GetBinding("command");
+  last_description_ = edge->GetBinding("description");
+  if (last_description_.empty() || force_full_command)
+    last_description_ = edge->GetBinding("command");
 
-  to_print = FormatProgressStatus(progress_status_format_, time_millis)
-      + to_print;
+  RefreshStatus(time_millis, force_full_command);
+}
 
+void StatusPrinter::RefreshStatus(int64_t cur_time_millis,
+                                  bool force_full_command) {
+  std::string to_print =
+      FormatProgressStatus(progress_status_format_, cur_time_millis) +
+      last_description_;
   printer_.Print(to_print,
                  force_full_command ? LinePrinter::FULL : LinePrinter::ELIDE);
+}
+
+void StatusPrinter::Refresh(int64_t cur_time_millis) {
+  if (printer_.is_smart_terminal()) {
+    RefreshStatus(cur_time_millis, false);
+  }
 }
 
 void StatusPrinter::Warning(const char* msg, ...) {

@@ -1729,6 +1729,11 @@ NORETURN void real_main(int argc, char** argv) {
   Options options = {};
   options.input_file = "build.ninja";
 
+  const char* status_refresh_env = getenv("NINJA_STATUS_REFRESH_MILLIS");
+  if (status_refresh_env) {
+    config.status_refresh_millis = atoi(status_refresh_env);
+  }
+
   setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
   const char* ninja_command = argv[0];
 

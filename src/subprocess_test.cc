@@ -146,6 +146,21 @@ TEST_F(SubprocessTest, InterruptParentWithSigHup) {
   ASSERT_FALSE("We should have been interrupted");
 }
 
+TEST_F(SubprocessTest, Timeout) {
+  Subprocess* subproc = subprocs_.Add("sleep 1");
+  ASSERT_NE((Subprocess*)0, subproc);
+  size_t timeout_count = 0;
+  while (true) {
+    ASSERT_FALSE(subproc->Done());
+    SubprocessSet::WorkResult ret = subprocs_.DoWork(100);
+    if (ret == SubprocessSet::WorkResult::TIMEOUT)
+      ++timeout_count;
+    else
+      break;
+  }
+  ASSERT_GT(timeout_count, 0);
+}
+
 TEST_F(SubprocessTest, Console) {
   // Skip test if we don't have the console ourselves.
   if (isatty(0) && isatty(1) && isatty(2)) {
