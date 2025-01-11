@@ -1,10 +1,10 @@
-// emhash8::HashMap for C++14/17
-// version 1.6.5
+// emhash8::HashMap for C++14/17/20
+// version 1.7.0
 // https://github.com/ktprime/emhash/blob/master/hash_table8.hpp
 //
 // Licensed under the MIT License <http://opensource.org/licenses/MIT>.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2021-2024 Huang Yuanbing & bailuzhou AT 163.com
+// Copyright (c) 2021-2025 Huang Yuanbing & bailuzhou AT 163.com
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,7 @@
 
 #undef  EMH_NEW
 #undef  EMH_EMPTY
+#undef  EMH_EQHASH 
 
 // likely/unlikely
 #if defined(__GNUC__) || defined(__INTEL_COMPILER) || defined(__clang__)
@@ -58,11 +59,11 @@
     _etail = bucket; \
     _index[bucket] = {bucket, _num_filled++ | ((size_type)(key_hash) & ~_mask)}
 
-#if _WIN32 && defined(_M_IX86)
-#include <xmmintrin.h>
-#endif
+    #if _WIN32 && defined(_M_IX86)
+    #include <xmmintrin.h>
+    #endif
 
-namespace emhash8 {
+    namespace emhash8 {
 
 struct DefaultPolicy {
     static constexpr float load_factor = 0.80f;
@@ -102,7 +103,6 @@ public:
     using key_equal = EqT;
 
     constexpr static size_type INACTIVE = 0-1u;
-    //constexpr uint32_t END      = 0-0x1u;
     constexpr static size_type EAD      = 2;
 
     struct Index
@@ -111,113 +111,124 @@ public:
         size_type slot;
     };
 
-    class const_iterator;
+    class const_iterator; // Forward declaration
+
     class iterator
     {
     public:
         using iterator_category = std::bidirectional_iterator_tag;
+        using iterator_concept = std::bidirectional_iterator_tag; // added for C++20 Ranges
         using difference_type = std::ptrdiff_t;
-        using value_type      = typename htype::value_type;
-        using pointer         = value_type*;
-        using const_pointer   = const value_type* ;
-        using reference       = value_type&;
+        using value_type = typename htype::value_type;
+        using pointer = value_type*;
+        using reference = value_type&;
+        using const_pointer = const value_type*;
         using const_reference = const value_type&;
 
-        iterator() : kv_(nullptr) {}
-        iterator(const_iterator& cit) {
-            kv_ = cit.kv_;
-        }
+        // Maak constructoren constexpr
+        constexpr iterator() : kv_(nullptr) {}
+        constexpr iterator(const const_iterator& cit) : kv_(cit.kv_) {}
+        constexpr iterator(const htype* hash_map, size_type bucket) : kv_(hash_map->_pairs + static_cast<int>(bucket)) {}
 
-        iterator(const htype* hash_map, size_type bucket) {
-            kv_ = hash_map->_pairs + (int)bucket;
-        }
-
-        iterator& operator++()
+        // Maak operatoren constexpr
+        constexpr iterator& operator++()
         {
-            kv_ ++;
+            kv_++;
             return *this;
         }
 
-        iterator operator++(int)
+        constexpr iterator operator++(int)
         {
-            auto cur = *this; kv_ ++;
+            iterator cur = *this;
+            kv_++;
             return cur;
         }
 
-        iterator& operator--()
+        constexpr iterator& operator--()
         {
-            kv_ --;
+            kv_--;
             return *this;
         }
 
-        iterator operator--(int)
+        constexpr iterator operator--(int)
         {
-            auto cur = *this; kv_ --;
+            iterator cur = *this;
+            kv_--;
             return cur;
         }
 
-        reference operator*() const { return *kv_; }
-        pointer operator->() const { return kv_; }
+        constexpr reference operator*() const { return *kv_; }
+        constexpr pointer operator->() const { return kv_; }
 
-        bool operator == (const iterator& rhs) const { return kv_ == rhs.kv_; }
-        bool operator != (const iterator& rhs) const { return kv_ != rhs.kv_; }
-        bool operator == (const const_iterator& rhs) const { return kv_ == rhs.kv_; }
-        bool operator != (const const_iterator& rhs) const { return kv_ != rhs.kv_; }
+        // Maak vergelijking operatoren constexpr
+        constexpr bool operator==(const iterator& rhs) const { return kv_ == rhs.kv_; }
+        constexpr bool operator!=(const iterator& rhs) const { return kv_ != rhs.kv_; }
+        constexpr bool operator==(const const_iterator& rhs) const { return kv_ == rhs.kv_; }
+        constexpr bool operator!=(const const_iterator& rhs) const { return kv_ != rhs.kv_; }
 
     public:
         value_type* kv_;
+    private:
+
+        // Vriend klasse om toegang te geven aan const_iterator
+        friend class const_iterator;
     };
+
+   
 
     class const_iterator
     {
     public:
         using iterator_category = std::bidirectional_iterator_tag;
-        using value_type        = typename htype::value_type;
-        using difference_type   = std::ptrdiff_t;
-        using pointer           = value_type*;
-        using const_pointer     = const value_type*;
-        using reference         = value_type&;
-        using const_reference   = const value_type&;
+        using iterator_concept = std::bidirectional_iterator_tag; // Toegevoegd voor C++20 Ranges
+        using value_type = typename htype::value_type;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const value_type*;
+        using const_pointer = const value_type*;
+        using reference = const value_type&;
+        using const_reference = const value_type&;
 
-        const_iterator(const iterator& it) {
-            kv_ = it.kv_;
-        }
+        // Maak constructoren constexpr
+        constexpr const_iterator() : kv_(nullptr) {}
+        constexpr const_iterator(const iterator& it) : kv_(it.kv_) {}
+        constexpr const_iterator(const htype* hash_map, size_type bucket) : kv_(hash_map->_pairs + static_cast<int>(bucket)) {}
 
-        const_iterator (const htype* hash_map, size_type bucket) {
-            kv_ = hash_map->_pairs + (int)bucket;
-        }
-
-        const_iterator& operator++()
+        // Maak operatoren constexpr
+        constexpr const_iterator& operator++()
         {
-            kv_ ++;
+            kv_++;
             return *this;
         }
 
-        const_iterator operator++(int)
+        constexpr const_iterator operator++(int)
         {
-            auto cur = *this; kv_ ++;
+            const_iterator cur = *this;
+            kv_++;
             return cur;
         }
 
-        const_iterator& operator--()
+        constexpr const_iterator& operator--()
         {
-            kv_ --;
+            kv_--;
             return *this;
         }
 
-        const_iterator operator--(int)
+        constexpr const_iterator operator--(int)
         {
-            auto cur = *this; kv_ --;
+            const_iterator cur = *this;
+            kv_--;
             return cur;
         }
 
-        const_reference operator*() const { return *kv_; }
-        const_pointer operator->() const { return kv_; }
+        constexpr const_reference operator*() const { return *kv_; }
+        constexpr const_pointer operator->() const { return kv_; }
 
-        bool operator == (const iterator& rhs) const { return kv_ == rhs.kv_; }
-        bool operator != (const iterator& rhs) const { return kv_ != rhs.kv_; }
-        bool operator == (const const_iterator& rhs) const { return kv_ == rhs.kv_; }
-        bool operator != (const const_iterator& rhs) const { return kv_ != rhs.kv_; }
+        // Maak vergelijking operatoren constexpr
+        constexpr bool operator==(const const_iterator& rhs) const { return kv_ == rhs.kv_; }
+        constexpr bool operator!=(const const_iterator& rhs) const { return kv_ != rhs.kv_; }
+        constexpr bool operator==(const iterator& rhs) const { return kv_ == rhs.kv_; }
+        constexpr bool operator!=(const iterator& rhs) const { return kv_ != rhs.kv_; }
+
     public:
         const value_type* kv_;
     };
@@ -241,7 +252,7 @@ public:
     HashMap(const HashMap& rhs)
     {
         if (rhs.load_factor() > EMH_MIN_LOAD_FACTOR) {
-            _pairs = alloc_bucket((size_type)(rhs._num_buckets * rhs.max_load_factor()) + 4);
+            _pairs = alloc_bucket((size_type)((float)rhs._num_buckets * rhs.max_load_factor()) + 4);
             _index = alloc_index(rhs._num_buckets);
             clone(rhs);
         } else {
@@ -267,7 +278,7 @@ public:
     template<class InputIt>
     HashMap(InputIt first, InputIt last, size_type bucket_count=4)
     {
-        init(std::distance(first, last) + bucket_count);
+        init((size_type)std::distance(first, last) + bucket_count);
         for (; first != last; ++first)
             emplace(*first);
     }
@@ -290,7 +301,7 @@ public:
         if (_num_buckets != rhs._num_buckets) {
             free(_pairs); free(_index);
             _index = alloc_index(rhs._num_buckets);
-            _pairs = alloc_bucket((size_type)(rhs._num_buckets * rhs.max_load_factor()) + 4);
+            _pairs = alloc_bucket((size_type)((float)rhs._num_buckets * rhs.max_load_factor()) + 4);
         }
 
         clone(rhs);
@@ -386,13 +397,13 @@ public:
     void pop_front() { erase(begin()); } //TODO. only erase first without move last
     void pop_back() { erase(last()); }
 
-    iterator begin() { return first(); }
-    const_iterator cbegin() const { return first(); }
-    const_iterator begin() const { return first(); }
+    constexpr iterator begin() { return first(); }
+    constexpr const_iterator cbegin() const { return first(); }
+    constexpr const_iterator begin() const { return first(); }
 
-    iterator end() { return {this, _num_filled}; }
-    const_iterator cend() const { return {this, _num_filled}; }
-    const_iterator end() const { return cend(); }
+    constexpr iterator end() { return { this, _num_filled }; }
+    constexpr const_iterator cend() const { return { this, _num_filled }; }
+    constexpr const_iterator end() const { return cend(); }
 
     const value_type* values() const { return _pairs; }
     const Index* index() const { return _index; }
@@ -402,7 +413,7 @@ public:
     size_type bucket_count() const { return _num_buckets; }
 
     /// Returns average number of elements per bucket.
-    float load_factor() const { return static_cast<float>(_num_filled) / (_mask + 1); }
+    float load_factor() const { return static_cast<float>(_num_filled) / ((float)_mask + 1.0f); }
 
     HashT& hash_function() const { return _hasher; }
     EqT& key_eq() const { return _eq; }
@@ -973,7 +984,7 @@ public:
         clearkv();
 
         if (_num_filled > 0)
-            memset((char*)_index, INACTIVE, sizeof(_index[0]) * _num_buckets);
+            memset((char*)_index, (int)INACTIVE, sizeof(_index[0]) * _num_buckets);
 
         _last = _num_filled = 0;
         _etail = INACTIVE;
@@ -1119,7 +1130,7 @@ public:
         });
 #endif
 
-        memset((char*)_index, INACTIVE, sizeof(_index[0]) * _num_buckets);
+        memset((char*)_index, (int)INACTIVE, sizeof(_index[0]) * _num_buckets);
         for (size_type slot = 0; slot < _num_filled; slot++) {
             const auto& key = _pairs[slot].first;
             const auto key_hash = hash_key(key);
@@ -1138,7 +1149,7 @@ public:
     void rebuild(size_type num_buckets) noexcept
     {
         free(_index);
-        auto new_pairs = (value_type*)alloc_bucket((size_type)(num_buckets * max_load_factor()) + 4);
+        auto new_pairs = (value_type*)alloc_bucket((size_type)((double)num_buckets * max_load_factor()) + 4);
         if (is_copy_trivially()) {
             if (_pairs)
             memcpy((char*)new_pairs, (char*)_pairs, _num_filled * sizeof(value_type));
@@ -1153,7 +1164,7 @@ public:
         _pairs = new_pairs;
         _index = (Index*)alloc_index (num_buckets);
 
-        memset((char*)_index, INACTIVE, sizeof(_index[0]) * num_buckets);
+        memset((char*)_index, (int)INACTIVE, sizeof(_index[0]) * num_buckets);
         memset((char*)(_index + num_buckets), 0, sizeof(_index[0]) * EAD);
     }
 
@@ -1337,8 +1348,8 @@ private:
 
         while (true) {
             if (EMH_EQHASH(next_bucket, key_hash)) {
-                const auto slot = _index[next_bucket].slot & _mask;
-                if (EMH_LIKELY(_eq(key, _pairs[slot].first)))
+                const auto eslot = _index[next_bucket].slot & _mask;
+                if (EMH_LIKELY(_eq(key, _pairs[eslot].first)))
                     return next_bucket;
             }
 
@@ -1372,9 +1383,9 @@ private:
 
         while (true) {
             if (EMH_EQHASH(next_bucket, key_hash)) {
-                const auto slot = _index[next_bucket].slot & _mask;
-                if (EMH_LIKELY(_eq(key, _pairs[slot].first)))
-                    return slot;
+                const auto eslot = _index[next_bucket].slot & _mask;
+                if (EMH_LIKELY(_eq(key, _pairs[eslot].first)))
+                    return eslot;
             }
 
             const auto nbucket = _index[next_bucket].next;
@@ -1622,7 +1633,6 @@ private:
 #endif
         }
 
-        return 0;
     }
 
     size_type find_last_bucket(size_type main_bucket) const
@@ -1831,4 +1841,3 @@ private:
     size_type _etail;
 };
 } // namespace emhash
-

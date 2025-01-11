@@ -341,6 +341,8 @@ if platform.is_msvc():
               '/wd4355',
               # Disable warnings about ignored typedef in DbgHelp.h
               '/wd4091',
+              # Disable warning about signed/unsigned mismatch and _unlink in gtest
+              '/wd4389', '/wd4996',
               '/GR-',  # Disable RTTI.
               '/Zc:__cplusplus',
               # Disable size_t -> int truncation warning.
@@ -362,7 +364,7 @@ else:
               '-Wno-unused-parameter',
               '-fno-rtti',
               '-fno-exceptions',
-              '-std=c++11',
+              '-std=c++14',
               '-fvisibility=hidden', '-pipe',
               '-DNINJA_PYTHON="%s"' % options.with_python]
     if options.debug:
