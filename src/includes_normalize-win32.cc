@@ -24,12 +24,10 @@
 
 #include <windows.h>
 
-using namespace std;
-
 namespace {
 
 bool InternalGetFullPathName(const StringPiece& file_name, char* buffer,
-                             size_t buffer_length, string *err) {
+                             size_t buffer_length, std::string* err) {
   DWORD result_size = GetFullPathNameA(file_name.AsString().c_str(),
                                        buffer_length, buffer, NULL);
   if (result_size == 0) {
@@ -71,7 +69,7 @@ bool SameDriveFast(StringPiece a, StringPiece b) {
 }
 
 // Return true if paths a and b are on the same Windows drive.
-bool SameDrive(StringPiece a, StringPiece b, string* err)  {
+bool SameDrive(StringPiece a, StringPiece b, std::string* err) {
   if (SameDriveFast(a, b)) {
     return true;
   }
@@ -126,8 +124,8 @@ bool IsFullPathName(StringPiece s) {
 
 }  // anonymous namespace
 
-IncludesNormalize::IncludesNormalize(const string& relative_to) {
-  string err;
+IncludesNormalize::IncludesNormalize(const std::string& relative_to) {
+  std::string err;
   relative_to_ = AbsPath(relative_to, &err);
   if (!err.empty()) {
     Fatal("Initializing IncludesNormalize(): %s", err.c_str());
@@ -135,9 +133,9 @@ IncludesNormalize::IncludesNormalize(const string& relative_to) {
   split_relative_to_ = SplitStringPiece(relative_to_, '/');
 }
 
-string IncludesNormalize::AbsPath(StringPiece s, string* err) {
+std::string IncludesNormalize::AbsPath(StringPiece s, std::string* err) {
   if (IsFullPathName(s)) {
-    string result = s.AsString();
+    std::string result = s.AsString();
     for (size_t i = 0; i < result.size(); ++i) {
       if (result[i] == '\\') {
         result[i] = '/';
@@ -156,21 +154,23 @@ string IncludesNormalize::AbsPath(StringPiece s, string* err) {
   return result;
 }
 
-string IncludesNormalize::Relativize(
-    StringPiece path, const vector<StringPiece>& start_list, string* err) {
-  string abs_path = AbsPath(path, err);
+std::string IncludesNormalize::Relativize(
+    StringPiece path, const std::vector<StringPiece>& start_list,
+    std::string* err) {
+  std::string abs_path = AbsPath(path, err);
   if (!err->empty())
     return "";
-  vector<StringPiece> path_list = SplitStringPiece(abs_path, '/');
+  std::vector<StringPiece> path_list = SplitStringPiece(abs_path, '/');
   int i;
-  for (i = 0; i < static_cast<int>(min(start_list.size(), path_list.size()));
+  for (i = 0;
+       i < static_cast<int>(std::min(start_list.size(), path_list.size()));
        ++i) {
     if (!EqualsCaseInsensitiveASCII(start_list[i], path_list[i])) {
       break;
     }
   }
 
-  vector<StringPiece> rel_list;
+  std::vector<StringPiece> rel_list;
   rel_list.reserve(start_list.size() - i + path_list.size() - i);
   for (int j = 0; j < static_cast<int>(start_list.size() - i); ++j)
     rel_list.push_back("..");
@@ -181,8 +181,8 @@ string IncludesNormalize::Relativize(
   return JoinStringPiece(rel_list, '/');
 }
 
-bool IncludesNormalize::Normalize(const string& input,
-                                  string* result, string* err) const {
+bool IncludesNormalize::Normalize(const std::string& input, std::string* result,
+                                  std::string* err) const {
   char copy[_MAX_PATH + 1];
   size_t len = input.size();
   if (len > _MAX_PATH) {
@@ -193,7 +193,7 @@ bool IncludesNormalize::Normalize(const string& input,
   uint64_t slash_bits;
   CanonicalizePath(copy, &len, &slash_bits);
   StringPiece partially_fixed(copy, len);
-  string abs_input = AbsPath(partially_fixed, err);
+  std::string abs_input = AbsPath(partially_fixed, err);
   if (!err->empty())
     return false;
 
