@@ -560,7 +560,55 @@ void Win32Fatal(const char* function, const char* hint) {
     Fatal("%s: %s", function, GetLastErrorString().c_str());
   }
 }
-#endif
+
+bool ConvertUTF8ToWin32Unicode(const std::string& input, std::wstring* output,
+                               std::string* err) {
+  output->clear();
+  if (input.empty())
+    return true;
+
+  int int_size = static_cast<int>(input.size());
+  if (static_cast<size_t>(int_size) != input.size()) {
+    *err = "Input string length > INT_MAX";
+    return false;
+  }
+  int wide_size =
+      MultiByteToWideChar(CP_UTF8, 0, input.c_str(), int_size, nullptr, 0);
+  if (wide_size <= 0) {
+    *err = "MultiByteToWideChar(" + input + "): " + GetLastErrorString();
+    return false;
+  }
+  output->resize(static_cast<size_t>(wide_size));
+  MultiByteToWideChar(CP_UTF8, 0, input.c_str(), int_size,
+                      const_cast<wchar_t*>(output->data()), wide_size);
+  return true;
+}
+
+bool ConvertWin32UnicodeToUTF8(const std::wstring& input, std::string* output,
+                               std::string* err) {
+  output->clear();
+  if (input.empty())
+    return true;
+
+  int int_size = static_cast<int>(input.size());
+  if (int_size != input.size()) {
+    *err = "Input string length > INT_MAX";
+    return false;
+  }
+  int utf8_size = WideCharToMultiByte(CP_UTF8, 0, input.c_str(), int_size, NULL,
+                                      0, NULL, NULL);
+  if (utf8_size <= 0) {
+    *err = "WideCharToMultiByte(" + std::string(input.begin(), input.end()) +
+           "): " + GetLastErrorString();
+    return false;
+  }
+
+  output->resize(static_cast<size_t>(utf8_size));
+  WideCharToMultiByte(CP_UTF8, 0, input.c_str(), int_size,
+                      const_cast<char*>(output->data()), utf8_size, NULL, NULL);
+  return true;
+}
+#endif  // _WIN32
 
 bool islatinalpha(int c) {
   // isalpha() is locale-dependent.
