@@ -24,11 +24,11 @@
 
 namespace {
 
-std::string GetCurDir() {
+std::string GetCurrentDirName() {
   char buf[_MAX_PATH];
   _getcwd(buf, sizeof(buf));
   std::vector<StringPiece> parts = SplitStringPiece(buf, '\\');
-  return parts[parts.size() - 1].AsString();
+  return parts.back().AsString();
 }
 
 std::string NormalizeAndCheckNoError(const std::string& input) {
@@ -59,7 +59,7 @@ TEST(IncludesNormalize, Simple) {
 
 TEST(IncludesNormalize, WithRelative) {
   std::string err;
-  std::string currentdir = GetCurDir();
+  std::string currentdir = GetCurrentDirName();
   EXPECT_EQ("c", NormalizeRelativeAndCheckNoError("a/b/c", "a/b"));
   EXPECT_EQ("a",
             NormalizeAndCheckNoError(IncludesNormalize::AbsPath("a", &err)));
@@ -107,10 +107,9 @@ TEST(IncludesNormalize, LongInvalidPath) {
   // Too long, won't be canonicalized. Ensure doesn't crash.
   std::string result, err;
   IncludesNormalize normalizer(".");
-  EXPECT_FALSE(
-      normalizer.Normalize(kLongInputString, &result, &err));
-  EXPECT_EQ("path too long", err);
-
+  EXPECT_TRUE(normalizer.Normalize(kLongInputString, &result, &err));
+  EXPECT_FALSE(result.empty());
+  EXPECT_TRUE(err.empty()) << err;
 
   // Construct max size path having cwd prefix.
   // kExactlyMaxPath = "$cwd\\a\\aaaa...aaaa\0";
@@ -142,7 +141,7 @@ TEST(IncludesNormalize, LongInvalidPath) {
             NormalizeAndCheckNoError(kExactlyMaxPath));
 }
 
-TEST(IncludesNormalize, ShortRelativeButTooLongAbsolutePath) {
+TEST(IncludesNormalize, ShortRelativeButLongAbsolutePath) {
   std::string result, err;
   IncludesNormalize normalizer(".");
   // A short path should work
@@ -162,6 +161,5 @@ TEST(IncludesNormalize, ShortRelativeButTooLongAbsolutePath) {
   EXPECT_EQ(strlen(kExactlyMaxPath), _MAX_PATH);
 
   // Make sure a path that's exactly _MAX_PATH long fails with a proper error.
-  EXPECT_FALSE(normalizer.Normalize(kExactlyMaxPath, &result, &err));
-  EXPECT_TRUE(err.find("GetFullPathName") != std::string::npos);
+  EXPECT_TRUE(normalizer.Normalize(kExactlyMaxPath, &result, &err)) << err;
 }
