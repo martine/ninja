@@ -139,6 +139,7 @@ add_library(libninja OBJECT
 	src/eval_env.cc
 	src/graph.cc
 	src/graphviz.cc
+	src/jobserver.cc
 	src/json.cc
 	src/line_printer.cc
 	src/manifest_parser.cc
@@ -156,6 +157,7 @@ if(WIN32)
 	target_sources(libninja PRIVATE
 		src/subprocess-win32.cc
 		src/includes_normalize-win32.cc
+		src/jobserver-win32.cc
 		src/msvc_helper-win32.cc
 		src/msvc_helper_main-win32.cc
 		src/getopt.c
@@ -171,7 +173,10 @@ if(WIN32)
 	# errors by telling windows.h to not define those two.
 	add_compile_definitions(NOMINMAX)
 else()
-	target_sources(libninja PRIVATE src/subprocess-posix.cc)
+	target_sources(libninja PRIVATE
+		src/jobserver-posix.cc
+		src/subprocess-posix.cc
+	)
 	if(CMAKE_SYSTEM_NAME STREQUAL "OS400" OR CMAKE_SYSTEM_NAME STREQUAL "AIX")
 		target_sources(libninja PRIVATE src/getopt.c)
 		# Build getopt.c, which can be compiled as either C or C++, as C++
@@ -277,6 +282,7 @@ if(BUILD_TESTING)
     src/elide_middle_test.cc
     src/explanations_test.cc
     src/graph_test.cc
+    src/jobserver_test.cc
     src/json_test.cc
     src/lexer_test.cc
     src/manifest_parser_test.cc

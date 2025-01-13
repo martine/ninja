@@ -27,6 +27,7 @@ jobs:
       run: |
         ./ninja_test --gtest_color=yes
         ../../misc/output_test.py
+        ../../misc/jobserver_test.py
     - name: Build release ninja
       run: CLICOLOR_FORCE=1 ninja -f build-Release.ninja
       working-directory: build
@@ -35,6 +36,7 @@ jobs:
       run: |
         ./ninja_test --gtest_color=yes
         ../../misc/output_test.py
+        ../../misc/jobserver_test.py
 
   build:
     runs-on: [ubuntu-latest]
@@ -166,6 +168,7 @@ jobs:
         ./ninja all
         python3 misc/ninja_syntax_test.py
         ./misc/output_test.py
+        ./misc/jobserver_test.py
 
   build-aarch64:
     name: Build Linux ARM64

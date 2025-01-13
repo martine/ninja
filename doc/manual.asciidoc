@@ -187,10 +187,42 @@ Ninja defaults to running commands in parallel anyway, so typically
 you don't need to pass `-j`.)
 
 
+GNU Jobserver support
+~~~~~~~~~~~~~~~~~~~~~
+
+Since version 1.13., Ninja builds can follow the
+https://https://www.gnu.org/software/make/manual/html_node/Job-Slots.html[GNU Make jobserver]
+client protocol. This is useful when Ninja is invoked as part of a larger
+build system controlled by a top-level GNU Make instance, or any other
+jobserver pool implementation, as it allows better coordination between
+concurrent build tasks.
+
+This feature is automatically enabled under the following conditions:
+
+- Dry-run (i.e. `-n` or `--dry-run`) is not enabled.
+
+- No explicit job count (e.g. `-j<COUNT>`) is passed on the command
+  line.
+
+- The `MAKEFLAGS` environment variable is defined and describes a valid
+  jobserver mode using `--jobserver-auth` or even `--jobserver-fds`.
+
+In this case, Ninja will use the jobserver pool of job slots to control
+parallelism, instead of its default implementation of `-j<count>`.
+
+Note that load-average limitations (i.e. when using `-l<count>`)
+are still being enforced in this mode.
+
+On Posix, Ninja supports both the `pipe` and `fifo` client modes, based on
+the content of `MAKEFLAGS`.
+
+IMPORTANT: A warning will be printed when `pipe` mode is detected, as this
+mode can be less reliable than `fifo`.
+
 Environment variables
 ~~~~~~~~~~~~~~~~~~~~~
 
-Ninja supports one environment variable to control its behavior:
+Ninja supports a few environment variables to control its behavior:
 `NINJA_STATUS`, the progress status printed before the rule being run.
 
 Several placeholders are available:
@@ -214,6 +246,10 @@ specified by `-j` or its default)
 The default progress status is `"[%f/%t] "` (note the trailing space
 to separate from the build rule). Another example of possible progress status
 could be `"[%u/%r/%f] "`.
+
+If `MAKEFLAGS` is defined in the environment, if may alter how
+Ninja dispatches parallel build commands. See the GNU Jobserver support
+section for details.
 
 Extra tools
 ~~~~~~~~~~~

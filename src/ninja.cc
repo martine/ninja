@@ -38,14 +38,15 @@
 #include "browse.h"
 #include "build.h"
 #include "build_log.h"
-#include "deps_log.h"
 #include "clean.h"
 #include "command_collector.h"
 #include "debug_flags.h"
 #include "depfile_parser.h"
+#include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
 #include "graphviz.h"
+#include "jobserver.h"
 #include "json.h"
 #include "manifest_parser.h"
 #include "metrics.h"
@@ -162,6 +163,10 @@ struct NinjaMain : public BuildLogUser {
   /// For each edge, lookup in build log how long it took last time,
   /// and record that in the edge itself. It will be used for ETA prediction.
   void ParsePreviousElapsedTimes();
+
+  /// Create a jobserver client if needed. Return a nullptr value if
+  /// not. Prints info and warnings to \a status.
+  std::unique_ptr<Jobserver::Client> SetupJobserverClient(Status* status);
 
   /// Build the targets listed on the command line.
   /// @return an exit code.
@@ -1541,9 +1546,60 @@ bool NinjaMain::EnsureBuildDirExists() {
   return true;
 }
 
+std::unique_ptr<Jobserver::Client> NinjaMain::SetupJobserverClient(
+    Status* status) {
+  // Empty result by default.
+  std::unique_ptr<Jobserver::Client> result;
+
+  // If dry-run or explicit job count, don't even look at MAKEFLAGS
+  if (config_.disable_jobserver_client)
+    return result;
+
+  const char* makeflags = getenv("MAKEFLAGS");
+  if (!makeflags) {
+    // MAKEFLAGS is not defined.
+    return result;
+  }
+
+  std::string err;
+  Jobserver::Config jobserver_config;
+  if (!Jobserver::ParseNativeMakeFlagsValue(makeflags, &jobserver_config,
+                                            &err)) {
+    // MAKEFLAGS is defined but could not be parsed correctly.
+    if (config_.verbosity > BuildConfig::QUIET)
+      status->Warning("Unsupported MAKEFLAGS value: %s [%s]", err.c_str(),
+                      makeflags);
+    return result;
+  }
+
+  if (!jobserver_config.HasMode()) {
+    // MAKEFLAGS is defined, but does not describe a jobserver mode.
+    return result;
+  }
+
+  if (config_.verbosity > BuildConfig::NO_STATUS_UPDATE) {
+    status->Info("Jobserver mode detected: %s", makeflags);
+#ifndef _WIN32
+    if (jobserver_config.mode == Jobserver::Config::kModePipe) {
+      status->Warning(
+          "Jobserver 'pipe' mode detected, a pool that implements 'fifo' mode "
+          "would be more reliable!");
+    }
+#endif
+  }
+
+  result = Jobserver::Client::Create(jobserver_config, &err);
+  if (!result.get()) {
+    // Jobserver client initialization failed !?
+    if (config_.verbosity > BuildConfig::QUIET)
+      status->Error("Could not initialize jobserver: %s", err.c_str());
+  }
+  return result;
+}
+
 int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
-  string err;
-  vector<Node*> targets;
+  std::string err;
+  std::vector<Node*> targets;
   if (!CollectTargetsFromArgs(argc, argv, &targets, &err)) {
     status->Error("%s", err.c_str());
     return 1;
@@ -1553,6 +1609,15 @@ int NinjaMain::RunBuild(int argc, char** argv, Status* status) {
 
   Builder builder(&state_, config_, &build_log_, &deps_log_, &disk_interface_,
                   status, start_time_millis_);
+
+  // Detect jobserver context and inject Jobserver::Client into the builder
+  // if needed.
+  std::unique_ptr<Jobserver::Client> jobserver_client =
+      SetupJobserverClient(status);
+  if (jobserver_client.get()) {
+    builder.SetJobserverClient(jobserver_client.get());
+  }
+
   for (size_t i = 0; i < targets.size(); ++i) {
     if (!builder.AddTarget(targets[i], &err)) {
       if (!err.empty()) {
@@ -1662,6 +1727,7 @@ int ReadFlags(int* argc, char*** argv,
         // We want to run N jobs in parallel. For N = 0, INT_MAX
         // is close enough to infinite for most sane builds.
         config->parallelism = value > 0 ? value : INT_MAX;
+        config->disable_jobserver_client = true;
         deferGuessParallelism.needGuess = false;
         break;
       }
@@ -1687,6 +1753,7 @@ int ReadFlags(int* argc, char*** argv,
       }
       case 'n':
         config->dry_run = true;
+        config->disable_jobserver_client = true;
         break;
       case 't':
         options->tool = ChooseTool(optarg);
