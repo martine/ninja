@@ -125,6 +125,18 @@ std::string GetLastErrorString();
 /// Calls Fatal() with a function name and GetLastErrorString.
 NORETURN void Win32Fatal(const char* function, const char* hint = NULL);
 
+/// Convert UTF-8 string to Win32 Unicode.
+/// On success, set |*output| then return true.
+/// On Failure, clear |*output|, set |*err| then return false.
+bool ConvertUTF8ToWin32Unicode(const std::string& input, std::wstring* output,
+                               std::string* err);
+
+/// Convert WIN32 Unicode to UTF-8 string.
+/// On success, set |*output| then return true.
+/// On Failure, clear |*output|, set |*err| then return false.
+bool ConvertWin32UnicodeToUTF8(const std::wstring& input, std::string* output,
+                               std::string* err);
+
 /// Naive implementation of C++ 20 std::bit_cast(), used to fix Clang and GCC
 /// [-Wcast-function-type] warning on casting result of GetProcAddress().
 template <class To, class From>
