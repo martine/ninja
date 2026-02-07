@@ -225,6 +225,10 @@ TEST(CanonicalizePath, PathSamplesWindows) {
   path = "\\";
   CanonicalizePath(&path);
   EXPECT_EQ("/", path);
+
+  path = "C:\\..\\./foo";
+  CanonicalizePath(&path);
+  EXPECT_EQ("foo", path);
 }
 
 TEST(CanonicalizePath, SlashTracking) {

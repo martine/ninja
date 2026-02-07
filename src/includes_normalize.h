@@ -21,20 +21,28 @@
 struct StringPiece;
 
 /// Utility functions for normalizing include paths on Windows.
-/// TODO: this likely duplicates functionality of CanonicalizePath; refactor.
 struct IncludesNormalize {
   /// Normalize path relative to |relative_to|.
-  IncludesNormalize(const std::string& relative_to);
+  IncludesNormalize(StringPiece relative_to);
 
-  // Internal utilities made available for testing, maybe useful otherwise.
-  static std::string AbsPath(StringPiece s, std::string* err);
-  static std::string Relativize(StringPiece path,
-                                const std::vector<StringPiece>& start_list,
-                                std::string* err);
+  /// Make |path| absolute and return whether it was successful. On failure,
+  /// load an error message to |err| and return false.
+  /// @pre |path| must be in the canonical form, see CanonicalizePath.
+  /// @pre |err| is empty.
+  static bool MakePathAbsolute(std::string* path, std::string* err);
+
+  /// Make the |abs_path| variable relative to the path components in
+  /// |start_list|.
+  /// @pre |abs_path| and |start_list| must both be absolute paths on the same
+  /// drive, and in the canonical form, see CanonicalizePath.
+  static void Relativize(std::string* abs_path,
+                         const std::vector<StringPiece>& start_list);
 
   /// Normalize by fixing slashes style, fixing redundant .. and . and makes the
-  /// path |input| relative to |this->relative_to_| and store to |result|.
-  bool Normalize(const std::string& input, std::string* result,
+  /// path |input| relative to |this->relative_to_| and store to |result|. On
+  /// failure, load an error message to |err| and return false.
+  /// @pre |err| is empty.
+  bool Normalize(StringPiece input, std::string* result,
                  std::string* err) const;
 
  private:
