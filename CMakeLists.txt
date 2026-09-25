@@ -282,6 +282,7 @@ if(BUILD_TESTING)
     src/elide_middle_test.cc
     src/explanations_test.cc
     src/graph_test.cc
+    src/indexed_range_test
     src/jobserver_test.cc
     src/jobserver_pool_test.cc
     src/json_test.cc
