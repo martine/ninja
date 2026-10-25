@@ -92,9 +92,9 @@ void StateTestWithBuiltinRules::AddCatRule(State* state) {
 "  command = cat $in > $out\n");
 }
 
-Node* StateTestWithBuiltinRules::GetNode(const string& path) {
+Node* StateTestWithBuiltinRules::GetNode(const string& path) const {
   EXPECT_FALSE(strpbrk(path.c_str(), "/\\"));
-  return state_.GetNode(path, 0);
+  return state_.GetNode(path);
 }
 
 void AssertParse(State* state, const char* input,

@@ -42,8 +42,10 @@ struct State;
 /// Information about a node in the dependency graph: the file, whether
 /// it's dirty, mtime, etc.
 struct Node {
-  Node(const std::string& path, uint64_t slash_bits)
-      : path_(path), slash_bits_(slash_bits) {}
+  enum class Loader : char { Manifest, Depfile, Dyndep };
+
+  Node(const std::string& path, uint64_t slash_bits, Loader loader)
+      : path_(path), slash_bits_(slash_bits), loader_(loader) {}
 
   /// Return false on error.
   bool Stat(DiskInterface* disk_interface, std::string* err);
@@ -77,6 +79,14 @@ struct Node {
     return exists_ == ExistenceStatusExists;
   }
 
+  void MarkExists() {
+    exists_ = ExistenceStatusExists;
+  }
+
+  bool missing() const {
+    return exists_ == ExistenceStatusMissing;
+  }
+
   bool status_known() const {
     return exists_ != ExistenceStatusUnknown;
   }
@@ -104,10 +114,22 @@ struct Node {
 
   /// Indicates whether this node was generated from a depfile or dyndep file,
   /// instead of being a regular input or output from the Ninja manifest.
-  bool generated_by_dep_loader() const { return generated_by_dep_loader_; }
+  bool generated_by_dep_loader() const {
+    return Loader::Manifest != loader_;
+  }
 
-  void set_generated_by_dep_loader(bool value) {
-    generated_by_dep_loader_ = value;
+  bool generated_by_dyndep_loader() const {
+    return Loader::Dyndep == loader_;
+  }
+
+  void set_generated_by_manifest() {
+    loader_ = Loader::Manifest;
+  }
+
+  /// A depfile overrides a dyndep-generated value.
+  void set_generated_by_depfile() {
+    if (loader_ == Loader::Dyndep)
+      loader_ = Loader::Depfile;
   }
 
   int id() const { return id_; }
@@ -156,12 +178,18 @@ private:
   /// has not yet been loaded.
   bool dyndep_pending_ = false;
 
-  /// Set to true when this node comes from a depfile, a dyndep file or the
-  /// deps log. If it does not have a producing edge, the build should not
-  /// abort if it is missing (as for regular source inputs). By default
-  /// all nodes have this flag set to true, since the deps and build logs
-  /// can be loaded before the manifest.
-  bool generated_by_dep_loader_ = true;
+  /// Tracks how this node was loaded: from a depfile, deps log, dyndep file, or
+  /// the manifest. A depfile overrides dyndep, the manifest always takes
+  /// precedence. Depfile and deps log share the same status and are not tracked
+  /// separately.
+  ///
+  /// If node is loaded from depfile or deps log and do not have a producing
+  /// edge, the build should not abort if it is missing (as for regular source
+  /// inputs or inputs loaded from dyndep).
+  ///
+  /// There is no implicit default, callers must explicitly set an initial
+  /// value.
+  Loader loader_;
 
   /// A dense integer id for the node, assigned and used by DepsLog.
   int id_ = -1;
@@ -234,7 +262,6 @@ struct Edge {
   bool outputs_ready_ = false;
   bool deps_loaded_ = false;
   bool deps_missing_ = false;
-  bool generated_by_dep_loader_ = false;
   TimeStamp command_start_time_ = 0;
 
   const Rule& rule() const { return *rule_; }

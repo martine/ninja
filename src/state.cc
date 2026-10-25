@@ -92,13 +92,37 @@ Edge* State::AddEdge(const Rule* rule) {
   return edge;
 }
 
-Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
+Node* State::GetNode(StringPiece path) const {
+  Node* node = LookupNode(path);
+  assert(node);
+  return node;
+}
+
+Node* State::FindOrCreateNode(StringPiece path, uint64_t slash_bits,
+                     Node::Loader Loader) {
   Node* node = LookupNode(path);
   if (node)
     return node;
-  node = new Node(path.AsString(), slash_bits);
+
+  node = new Node(path.AsString(), slash_bits, Loader);
   paths_[node->path()] = node;
   return node;
+}
+
+Node* State::FindOrCreateManifestNode(StringPiece path, uint64_t slash_bits) {
+  auto node = FindOrCreateNode(path, slash_bits, Node::Loader::Manifest);
+  node->set_generated_by_manifest();  // Manifest wins
+  return node;
+}
+
+Node* State::FindOrCreateDepfileNode(StringPiece path, uint64_t slash_bits) {
+  auto node = FindOrCreateNode(path, slash_bits, Node::Loader::Depfile);
+  node->set_generated_by_depfile();
+  return node;
+}
+
+Node* State::FindOrCreateDyndepNode(StringPiece path, uint64_t slash_bits) {
+  return FindOrCreateNode(path, slash_bits, Node::Loader::Dyndep);
 }
 
 Node* State::LookupNode(StringPiece path) const {
@@ -126,15 +150,14 @@ Node* State::SpellcheckNode(const string& path) {
 }
 
 void State::AddIn(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
-  node->set_generated_by_dep_loader(false);
+  Node* node = FindOrCreateManifestNode(path, slash_bits);
   edge->inputs_.push_back(node);
   node->AddOutEdge(edge);
 }
 
 bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
                    std::string* err) {
-  Node* node = GetNode(path, slash_bits);
+  Node* node = FindOrCreateManifestNode(path, slash_bits);
   if (Edge* other = node->in_edge()) {
     if (other == edge) {
       *err = path.AsString() + " is defined as an output multiple times";
@@ -145,15 +168,13 @@ bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
   }
   edge->outputs_.push_back(node);
   node->set_in_edge(edge);
-  node->set_generated_by_dep_loader(false);
   return true;
 }
 
 void State::AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
+  Node* node = FindOrCreateManifestNode(path, slash_bits);
   edge->validations_.push_back(node);
   node->AddValidationOutEdge(edge);
-  node->set_generated_by_dep_loader(false);
 }
 
 bool State::AddDefault(StringPiece path, string* err) {

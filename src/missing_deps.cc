@@ -53,7 +53,7 @@ std::optional<EdgeInputsRange> NodeStoringImplicitDepLoader::ProcessDepfileDeps(
        i != depfile_ins->end(); ++i) {
     uint64_t slash_bits;
     CanonicalizePath(const_cast<char*>(i->str_), &i->len_, &slash_bits);
-    Node* node = state_->GetNode(*i, slash_bits);
+    Node* node = state_->FindOrCreateDepfileNode(*i, slash_bits);
     dep_nodes_output_->push_back(node);
   }
   return EdgeInputsRange(edge);

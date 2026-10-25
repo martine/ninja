@@ -970,7 +970,7 @@ std::optional<EdgeInputsRange> ImplicitDepLoader::ProcessDepfileDeps(
        i != depfile_ins->end(); ++i, ++implicit_dep) {
     uint64_t slash_bits;
     CanonicalizePath(const_cast<char*>(i->str_), &i->len_, &slash_bits);
-    Node* node = state_->GetNode(*i, slash_bits);
+    Node* node = state_->FindOrCreateDepfileNode(*i, slash_bits);
     *implicit_dep = node;
     node->AddOutEdge(edge);
   }

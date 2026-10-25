@@ -35,7 +35,7 @@ struct StateTestWithBuiltinRules : public testing::Test {
   void AddCatRule(State* state);
 
   /// Short way to get a Node by its path from state_.
-  Node* GetNode(const std::string& path);
+  Node* GetNode(const std::string& path) const;
 
   State state_;
 };

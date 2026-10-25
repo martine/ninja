@@ -47,16 +47,16 @@ TEST_F(DepsLogTest, WriteRead) {
 
   {
     vector<Node*> deps;
-    deps.push_back(state1.GetNode("foo.h", 0));
-    deps.push_back(state1.GetNode("bar.h", 0));
-    log1.RecordDeps(state1.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state1.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state1.FindOrCreateDepfileNode("bar.h", 0));
+    log1.RecordDeps(state1.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
     deps.clear();
-    deps.push_back(state1.GetNode("foo.h", 0));
-    deps.push_back(state1.GetNode("bar2.h", 0));
-    log1.RecordDeps(state1.GetNode("out2.o", 0), 2, deps);
+    deps.push_back(state1.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state1.FindOrCreateDepfileNode("bar2.h", 0));
+    log1.RecordDeps(state1.FindOrCreateDepfileNode("out2.o", 0), 2, deps);
 
-    DepsLog::Deps* log_deps = log1.GetDeps(state1.GetNode("out.o", 0));
+    DepsLog::Deps* log_deps = log1.GetDeps(state1.GetNode("out.o"));
     ASSERT_TRUE(log_deps);
     ASSERT_EQ(1, log_deps->mtime);
     ASSERT_EQ(2, log_deps->node_count);
@@ -80,7 +80,7 @@ TEST_F(DepsLogTest, WriteRead) {
   }
 
   // Spot-check the entries in log2.
-  DepsLog::Deps* log_deps = log2.GetDeps(state2.GetNode("out2.o", 0));
+  DepsLog::Deps* log_deps = log2.GetDeps(state2.GetNode("out2.o"));
   ASSERT_TRUE(log_deps);
   ASSERT_EQ(2, log_deps->mtime);
   ASSERT_EQ(2, log_deps->node_count);
@@ -102,11 +102,11 @@ TEST_F(DepsLogTest, LotsOfDeps) {
     for (int i = 0; i < kNumDeps; ++i) {
       char buf[32];
       sprintf(buf, "file%d.h", i);
-      deps.push_back(state1.GetNode(buf, 0));
+      deps.push_back(state1.FindOrCreateDepfileNode(buf, 0));
     }
-    log1.RecordDeps(state1.GetNode("out.o", 0), 1, deps);
+    log1.RecordDeps(state1.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
-    DepsLog::Deps* log_deps = log1.GetDeps(state1.GetNode("out.o", 0));
+    DepsLog::Deps* log_deps = log1.GetDeps(state1.GetNode("out.o"));
     ASSERT_EQ(kNumDeps, log_deps->node_count);
   }
 
@@ -117,7 +117,7 @@ TEST_F(DepsLogTest, LotsOfDeps) {
   EXPECT_TRUE(log2.Load(kTestFilename, &state2, &err));
   ASSERT_EQ("", err);
 
-  DepsLog::Deps* log_deps = log2.GetDeps(state2.GetNode("out.o", 0));
+  DepsLog::Deps* log_deps = log2.GetDeps(state2.GetNode("out.o"));
   ASSERT_EQ(kNumDeps, log_deps->node_count);
 }
 
@@ -133,9 +133,9 @@ TEST_F(DepsLogTest, DoubleEntry) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
     log.Close();
 #ifdef __USE_LARGEFILE64
     struct stat64 st;
@@ -159,9 +159,9 @@ TEST_F(DepsLogTest, DoubleEntry) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.GetNode("foo.h"));
+    deps.push_back(state.GetNode("bar.h"));
+    log.RecordDeps(state.GetNode("out.o"), 1, deps);
     log.Close();
 #ifdef __USE_LARGEFILE64
     struct stat64 st;
@@ -195,14 +195,14 @@ TEST_F(DepsLogTest, Recompact) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
     deps.clear();
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("baz.h", 0));
-    log.RecordDeps(state.GetNode("other_out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("baz.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("other_out.o", 0), 1, deps);
 
     log.Close();
 #ifdef __USE_LARGEFILE64
@@ -229,8 +229,8 @@ TEST_F(DepsLogTest, Recompact) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.GetNode("foo.h"));
+    log.RecordDeps(state.GetNode("out.o"), 1, deps);
     log.Close();
 
 #ifdef __USE_LARGEFILE64
@@ -255,14 +255,14 @@ TEST_F(DepsLogTest, Recompact) {
     string err;
     ASSERT_TRUE(log.Load(kTestFilename, &state, &err));
 
-    Node* out = state.GetNode("out.o", 0);
+    Node* out = state.GetNode("out.o");
     DepsLog::Deps* deps = log.GetDeps(out);
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->mtime);
     ASSERT_EQ(1, deps->node_count);
     ASSERT_EQ("foo.h", deps->nodes[0]->path());
 
-    Node* other_out = state.GetNode("other_out.o", 0);
+    Node* other_out = state.GetNode("other_out.o");
     deps = log.GetDeps(other_out);
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->mtime);
@@ -309,14 +309,14 @@ TEST_F(DepsLogTest, Recompact) {
     string err;
     ASSERT_TRUE(log.Load(kTestFilename, &state, &err));
 
-    Node* out = state.GetNode("out.o", 0);
+    Node* out = state.GetNode("out.o");
     DepsLog::Deps* deps = log.GetDeps(out);
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->mtime);
     ASSERT_EQ(1, deps->node_count);
     ASSERT_EQ("foo.h", deps->nodes[0]->path());
 
-    Node* other_out = state.GetNode("other_out.o", 0);
+    Node* other_out = state.GetNode("other_out.o");
     deps = log.GetDeps(other_out);
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->mtime);
@@ -387,14 +387,14 @@ TEST_F(DepsLogTest, Truncated) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
     deps.clear();
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar2.h", 0));
-    log.RecordDeps(state.GetNode("out2.o", 0), 2, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar2.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out2.o", 0), 2, deps);
 
     log.Close();
   }
@@ -451,14 +451,14 @@ TEST_F(DepsLogTest, TruncatedRecovery) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
     deps.clear();
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar2.h", 0));
-    log.RecordDeps(state.GetNode("out2.o", 0), 2, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar2.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out2.o", 0), 2, deps);
 
     log.Close();
   }
@@ -486,16 +486,16 @@ TEST_F(DepsLogTest, TruncatedRecovery) {
     err.clear();
 
     // The truncated entry should've been discarded.
-    EXPECT_EQ(NULL, log.GetDeps(state.GetNode("out2.o", 0)));
+    EXPECT_EQ(NULL, log.GetDeps(state.GetNode("out2.o")));
 
     EXPECT_TRUE(log.OpenForWrite(kTestFilename, &err));
     ASSERT_EQ("", err);
 
     // Add a new entry.
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar2.h", 0));
-    log.RecordDeps(state.GetNode("out2.o", 0), 3, deps);
+    deps.push_back(state.GetNode("foo.h"));
+    deps.push_back(state.GetNode("bar2.h"));
+    log.RecordDeps(state.GetNode("out2.o"), 3, deps);
 
     log.Close();
   }
@@ -509,7 +509,7 @@ TEST_F(DepsLogTest, TruncatedRecovery) {
     EXPECT_TRUE(log.Load(kTestFilename, &state, &err));
 
     // The truncated entry should exist.
-    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out2.o", 0));
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out2.o"));
     ASSERT_TRUE(deps);
   }
 }
@@ -522,23 +522,23 @@ TEST_F(DepsLogTest, ReverseDepsNodes) {
   ASSERT_EQ("", err);
 
   vector<Node*> deps;
-  deps.push_back(state.GetNode("foo.h", 0));
-  deps.push_back(state.GetNode("bar.h", 0));
-  log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+  deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+  deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+  log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
 
   deps.clear();
-  deps.push_back(state.GetNode("foo.h", 0));
-  deps.push_back(state.GetNode("bar2.h", 0));
-  log.RecordDeps(state.GetNode("out2.o", 0), 2, deps);
+  deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+  deps.push_back(state.FindOrCreateDepfileNode("bar2.h", 0));
+  log.RecordDeps(state.FindOrCreateDepfileNode("out2.o", 0), 2, deps);
 
   log.Close();
 
-  Node* rev_deps = log.GetFirstReverseDepsNode(state.GetNode("foo.h", 0));
-  EXPECT_TRUE(rev_deps == state.GetNode("out.o", 0) ||
-              rev_deps == state.GetNode("out2.o", 0));
+  Node* rev_deps = log.GetFirstReverseDepsNode(state.GetNode("foo.h"));
+  EXPECT_TRUE(rev_deps == state.GetNode("out.o") ||
+              rev_deps == state.GetNode("out2.o"));
 
-  rev_deps = log.GetFirstReverseDepsNode(state.GetNode("bar.h", 0));
-  EXPECT_TRUE(rev_deps == state.GetNode("out.o", 0));
+  rev_deps = log.GetFirstReverseDepsNode(state.GetNode("bar.h"));
+  EXPECT_TRUE(rev_deps == state.GetNode("out.o"));
 }
 
 TEST_F(DepsLogTest, MalformedDepsLog) {
@@ -551,9 +551,9 @@ TEST_F(DepsLogTest, MalformedDepsLog) {
 
     // First, create a valid log file.
     std::vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.hh", 0));
-    deps.push_back(state.GetNode("bar.hpp", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.hh", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.hpp", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
     log.Close();
   }
 
@@ -724,7 +724,8 @@ TEST_F(DepsLogTest, MalformedDepsLog) {
     ASSERT_EQ(LOAD_SUCCESS, log.Load(kBadLogFile, &state, &err));
     ASSERT_EQ("premature end of file; recovering", err);
 
-    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    DepsLog::Deps* deps =
+        log.GetDeps(state.GetNode("out.o"));
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->mtime);
     ASSERT_EQ(2, deps->node_count);
@@ -754,9 +755,9 @@ TEST_F(DepsLogTest, DuplicatePathRecovery) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    deps.push_back(state.GetNode("bar.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    deps.push_back(state.FindOrCreateDepfileNode("bar.h", 0));
+    log.RecordDeps(state.FindOrCreateManifestNode("out.o", 0), 1, deps);
     log.Close();
   }
 
@@ -792,7 +793,7 @@ TEST_F(DepsLogTest, DuplicatePathRecovery) {
     ASSERT_EQ("premature end of file; recovering", err);
 
     // Records before the duplicate should survive.
-    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o"));
     ASSERT_TRUE(deps);
     ASSERT_EQ(2, deps->node_count);
   }
@@ -806,7 +807,7 @@ TEST_F(DepsLogTest, DuplicatePathRecovery) {
     ASSERT_EQ(LOAD_SUCCESS, log.Load(kTestFilename, &state, &err));
     ASSERT_EQ("", err);
 
-    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o"));
     ASSERT_TRUE(deps);
     ASSERT_EQ(2, deps->node_count);
   }
@@ -823,8 +824,8 @@ TEST_F(DepsLogTest, RecompactBogusOutId) {
     ASSERT_EQ("", err);
 
     vector<Node*> deps;
-    deps.push_back(state.GetNode("foo.h", 0));
-    log.RecordDeps(state.GetNode("out.o", 0), 1, deps);
+    deps.push_back(state.FindOrCreateDepfileNode("foo.h", 0));
+    log.RecordDeps(state.FindOrCreateDepfileNode("out.o", 0), 1, deps);
     log.Close();
   }
 
@@ -857,7 +858,8 @@ TEST_F(DepsLogTest, RecompactBogusOutId) {
     ASSERT_EQ(LOAD_SUCCESS, log.Load(kTestFilename, &state, &err));
     ASSERT_EQ("premature end of file; recovering", err);
 
-    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    DepsLog::Deps* deps =
+        log.GetDeps(state.GetNode("out.o"));
     ASSERT_TRUE(deps);
     ASSERT_EQ(1, deps->node_count);
 

@@ -201,7 +201,7 @@ bool DyndepParser::ParseEdge(string* err) {
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
     CanonicalizePath(&path, &slash_bits);
-    Node* n = state_->GetNode(path, slash_bits);
+    Node* n = state_->FindOrCreateDyndepNode(path, slash_bits);
     dyndeps->implicit_inputs_.push_back(n);
   }
 
@@ -212,7 +212,7 @@ bool DyndepParser::ParseEdge(string* err) {
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
     CanonicalizePath(&path, &slash_bits);
-    Node* n = state_->GetNode(path, slash_bits);
+    Node* n = state_->FindOrCreateDyndepNode(path, slash_bits);
     dyndeps->implicit_outputs_.push_back(n);
   }
 

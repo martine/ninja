@@ -412,7 +412,7 @@ bool ManifestParser::ParseEdge(string* err) {
   if (!dyndep.empty()) {
     uint64_t slash_bits;
     CanonicalizePath(&dyndep, &slash_bits);
-    edge->dyndep_ = state_->GetNode(dyndep, slash_bits);
+    edge->dyndep_ = state_->FindOrCreateManifestNode(dyndep, slash_bits);
     edge->dyndep_->set_dyndep_pending(true);
     vector<Node*>::iterator dgi =
       std::find(edge->inputs_.begin(), edge->inputs_.end(), edge->dyndep_);
