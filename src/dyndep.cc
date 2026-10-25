@@ -44,7 +44,9 @@ bool DyndepLoader::LoadDyndeps(Node* node, DyndepFile* ddf,
     return false;
 
   // Update each edge that specified this node as its dyndep binding.
-  std::vector<Edge*> const& out_edges = node->out_edges();
+  // The manifest parser requires the dyndep binding to be an input of the
+  // edge, so the recorded out-edges are sufficient.
+  std::vector<Edge*> const& out_edges = node->recorded_out_edges();
   for (Edge* edge : out_edges) {
     if (edge->dyndep_ != node)
       continue;
@@ -99,7 +101,7 @@ bool DyndepLoader::UpdateEdge(Edge* edge, Dyndeps const* dyndeps,
       *err = "multiple rules generate " + node->path();
       return false;
     }
-    node->set_in_edge(edge);
+    node->set_in_edge(edge, state_);
   }
 
   // Add the dyndep-discovered inputs to the edge.

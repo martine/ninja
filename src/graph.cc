@@ -756,6 +756,15 @@ std::string Edge::GetUnescapedRspfile() const {
   return env.LookupVariable("rspfile");
 }
 
+void Node::ResolveOutEdges(State* state) {
+  for (Edge* e : state->edges_) {
+    if (std::find(e->inputs_.begin(), e->inputs_.end(), this) !=
+            e->inputs_.end() &&
+        std::find(out_edges_.begin(), out_edges_.end(), e) == out_edges_.end())
+      AddOutEdge(e);
+  }
+}
+
 void Edge::Dump(const char* prefix) const {
   printf("%s[ ", prefix);
   for (vector<Node*>::const_iterator i = inputs_.begin();
@@ -826,8 +835,8 @@ void Node::Dump(const char* prefix) const {
     printf("no in-edge\n");
   }
   printf(" out edges:\n");
-  for (vector<Edge*>::const_iterator e = out_edges().begin();
-       e != out_edges().end() && *e != NULL; ++e) {
+  for (vector<Edge*>::const_iterator e = recorded_out_edges().begin();
+       e != recorded_out_edges().end() && *e != NULL; ++e) {
     (*e)->Dump(" +- ");
   }
   if (!validation_out_edges().empty()) {
@@ -972,7 +981,7 @@ std::optional<EdgeInputsRange> ImplicitDepLoader::ProcessDepfileDeps(
     CanonicalizePath(const_cast<char*>(i->str_), &i->len_, &slash_bits);
     Node* node = state_->GetNode(*i, slash_bits);
     *implicit_dep = node;
-    node->AddOutEdge(edge);
+    node->AddLazyOutEdge(edge);
   }
 
   const auto end = implicit_dep;
@@ -1010,7 +1019,7 @@ std::optional<EdgeInputsRange> ImplicitDepLoader::LoadDepsFromLog(Edge* edge,
 
   edge->implicit_deps_ += static_cast<int>(node_count);
   for (size_t i = 0; i < node_count; ++i) {
-    nodes[i]->AddOutEdge(edge);
+    nodes[i]->AddLazyOutEdge(edge);
   }
 
   const auto begin = edge->inputs_.insert(implicit_dep, nodes, nodes + node_count);
