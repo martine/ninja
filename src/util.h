@@ -24,6 +24,7 @@
 #include <stdarg.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if !defined(__has_cpp_attribute)
@@ -70,8 +71,14 @@ void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits);
 /// Bash, or Win32's CommandLineToArgvW().
 /// Appends the string directly to |result| without modification if we can
 /// determine that it contains no problematic characters.
-void GetShellEscapedString(const std::string& input, std::string* result);
-void GetWin32EscapedString(const std::string& input, std::string* result);
+void GetShellEscapedString(std::string_view input, std::string* result);
+void GetWin32EscapedString(std::string_view input, std::string* result);
+
+/// Return whether |input| needs escaping for GetShellEscapedString() or
+/// GetWin32EscapedString(), checking one character at a time. These are used
+/// for short inputs and as a reference for testing.
+bool StringNeedsShellEscapingFallback(std::string_view input);
+bool StringNeedsWin32EscapingFallback(std::string_view input);
 
 /// Read a file to a string (in text mode: with CRLF conversion
 /// on Windows).

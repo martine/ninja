@@ -16,6 +16,9 @@
 
 #include "test.h"
 
+#include <cassert>
+#include <random>
+
 using namespace std;
 
 namespace {
@@ -489,6 +492,119 @@ TEST(PathEscaping, SensibleWin32PathsAreNotNeedlesslyEscaped) {
 
   GetWin32EscapedString(path, &result);
   EXPECT_EQ(path, result);
+}
+
+namespace {
+
+// The original implementations of GetShellEscapedString and
+// GetWin32EscapedString to compare with.
+
+void ReferenceShellEscape(std::string_view input, string* result) {
+  assert(result);
+
+  if (!StringNeedsShellEscapingFallback(input)) {
+    result->append(input);
+    return;
+  }
+
+  const char kQuote = '\'';
+  const char kEscapeSequence[] = "'\\'";
+
+  result->push_back(kQuote);
+
+  std::string_view::const_iterator span_begin = input.begin();
+  for (std::string_view::const_iterator it = input.begin(), end = input.end();
+       it != end; ++it) {
+    if (*it == kQuote) {
+      result->append(span_begin, it);
+      result->append(kEscapeSequence);
+      span_begin = it;
+    }
+  }
+  result->append(span_begin, input.end());
+  result->push_back(kQuote);
+}
+
+void ReferenceWin32Escape(std::string_view input, string* result) {
+  assert(result);
+  if (!StringNeedsWin32EscapingFallback(input)) {
+    result->append(input);
+    return;
+  }
+
+  const char kQuote = '"';
+  const char kBackslash = '\\';
+
+  result->push_back(kQuote);
+  size_t consecutive_backslash_count = 0;
+  std::string_view::const_iterator span_begin = input.begin();
+  for (std::string_view::const_iterator it = input.begin(), end = input.end();
+       it != end; ++it) {
+    switch (*it) {
+      case kBackslash:
+        ++consecutive_backslash_count;
+        break;
+      case kQuote:
+        result->append(span_begin, it);
+        result->append(consecutive_backslash_count + 1, kBackslash);
+        span_begin = it;
+        consecutive_backslash_count = 0;
+        break;
+      default:
+        consecutive_backslash_count = 0;
+        break;
+    }
+  }
+  result->append(span_begin, input.end());
+  result->append(consecutive_backslash_count, kBackslash);
+  result->push_back(kQuote);
+}
+
+void ExpectEscapesLikeReference(std::string_view input) {
+  string expected;
+  string actual;
+  ReferenceShellEscape(input, &expected);
+  GetShellEscapedString(input, &actual);
+  EXPECT_EQ(expected, actual);
+
+  expected.clear();
+  actual.clear();
+  ReferenceWin32Escape(input, &expected);
+  GetWin32EscapedString(input, &actual);
+  EXPECT_EQ(expected, actual);
+}
+
+}  // namespace
+
+TEST(PathEscaping, EveryByteAtEveryPosition) {
+  // Each byte value at every position of strings around a word in length.
+  for (int c = 0; c < 256; ++c) {
+    for (std::size_t len = 1; len <= 17; ++len) {
+      for (std::size_t pos = 0; pos < len; ++pos) {
+        std::string input(len, 'a');
+        input[pos] = static_cast<char>(c);
+        ExpectEscapesLikeReference(input);
+        if (HasFailure())
+          return;
+      }
+    }
+  }
+}
+
+TEST(PathEscaping, Random) {
+  std::mt19937 rng(42);
+  const char kCommon[] = "aZ09_+-./\\ \"',:$";
+  for (int i = 0; i < 20000; ++i) {
+    std::string input(rng() % 40, 'x');
+    for (char& c : input) {
+      // Mostly common path characters, with any byte sometimes.
+      c = rng() % 8 ? kCommon[rng() % (sizeof(kCommon) - 1)]
+                    : static_cast<char>(rng() % 256);
+    }
+    ExpectEscapesLikeReference(input);
+    if (HasFailure())
+      return;
+  }
 }
 
 TEST(StripAnsiEscapeCodes, EscapeAtEnd) {
