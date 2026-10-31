@@ -46,6 +46,9 @@ struct Plan {
   /// Add a target to our plan (including all its dependencies).
   /// Returns false if we don't need to build this target; may
   /// fill in |err| with an error message if there's a problem.
+  bool AddTarget(const Node* target, uint16_t prio, std::string* err);
+
+  /// using default priority
   bool AddTarget(const Node* target, std::string* err);
 
   // Pop a ready edge off the queue of edges to build.
@@ -112,7 +115,8 @@ struct Plan {
                                std::string* err);
   void UnmarkDependents(const Node* node, std::set<Node*>* dependents);
   bool AddSubTarget(const Node* node, const Node* dependent, std::string* err,
-                    std::set<Edge*>* dyndep_walk);
+                    std::set<Edge*>* dyndep_walk,
+                    uint16_t prio = Edge::kpriority_group_unassigned);
 
   // Add edges that kWantToStart into the ready queue
   // Must be called after ComputeCriticalPath and before FindWork
@@ -224,10 +228,15 @@ struct Builder {
   /// Clean up after interrupted commands by deleting output files.
   void Cleanup();
 
+  // unittests only
   Node* AddTarget(const std::string& name, std::string* err);
+  Node* AddTarget(const std::string& name, uint16_t prio, std::string* err);
 
   /// Add a target to the build, scanning dependencies.
   /// @return false on error.
+  bool AddTarget(Node* target, uint16_t prio, std::string* err);
+
+  // using default priority
   bool AddTarget(Node* target, std::string* err);
 
   /// Returns true if the build targets are already up to date.

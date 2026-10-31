@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <optional>
@@ -1773,6 +1774,7 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   }
 
   const std::vector<Node*>& targets(collected->first);
+  const bool from_command_line = collected->second;
 
   disk_interface_.AllowStatCache(g_experimental_statcache);
 
@@ -1787,7 +1789,16 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   }
 
   for (size_t i = 0; i < targets.size(); ++i) {
-    if (!builder.AddTarget(targets[i], &err)) {
+    const uint16_t prio = [&]() {
+      // if no targets form Args are given, the default targets shall be all in the
+      // same priority group
+      if (from_command_line)
+        return static_cast<uint16_t>(Edge::kpriority_group_unassigned + 1);
+      else
+        return static_cast<uint16_t>(std::min<size_t>(i + 1, UINT16_MAX));
+    }();
+
+    if (!builder.AddTarget(targets[i], prio, &err)) {
       if (!err.empty()) {
         status->Error("%s", err.c_str());
         return ExitFailure;
