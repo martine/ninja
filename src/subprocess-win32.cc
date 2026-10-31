@@ -64,6 +64,8 @@ HANDLE Subprocess::SetupPipe(HANDLE ioport) {
   // Get the write end of the pipe as a handle inheritable across processes.
   HANDLE output_write_handle =
       CreateFileA(pipe_name, GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
+  if (output_write_handle == INVALID_HANDLE_VALUE)
+    Win32Fatal("CreateFile");
   HANDLE output_write_child;
   if (!DuplicateHandle(GetCurrentProcess(), output_write_handle,
                        GetCurrentProcess(), &output_write_child,
