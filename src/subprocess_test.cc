@@ -106,6 +106,43 @@ TEST_F(SubprocessTest, NoSuchCommand) {
 #endif
 }
 
+#ifdef _WIN32
+#ifdef _MSC_VER
+#pragma comment(lib, "advapi32.lib")
+#endif
+
+// If the write end of the pipe can't be opened, ninja must fail rather than
+// hand the child a bogus handle and wait forever for the pipe to connect.
+TEST_F(SubprocessTest, PipeOpenFailureIsFatal) {
+  // A token restricted to Everyone and Users can still create the pipe, but
+  // the pipe's default DACL grants neither of them access, so opening it for
+  // writing fails.
+  BYTE everyone[SECURITY_MAX_SID_SIZE];
+  DWORD everyone_size = sizeof(everyone);
+  ASSERT_TRUE(CreateWellKnownSid(WinWorldSid, NULL, everyone, &everyone_size));
+  BYTE users[SECURITY_MAX_SID_SIZE];
+  DWORD users_size = sizeof(users);
+  ASSERT_TRUE(CreateWellKnownSid(WinBuiltinUsersSid, NULL, users, &users_size));
+  SID_AND_ATTRIBUTES restricting_sids[] = { { everyone, 0 }, { users, 0 } };
+  HANDLE token;
+  ASSERT_TRUE(OpenProcessToken(GetCurrentProcess(),
+                               TOKEN_DUPLICATE | TOKEN_QUERY, &token));
+  HANDLE restricted;
+  BOOL ok = CreateRestrictedToken(token, 0, 0, NULL, 0, NULL, 2,
+                                  restricting_sids, &restricted);
+  CloseHandle(token);
+  ASSERT_TRUE(ok);
+
+  EXPECT_DEATH(
+      {
+        ASSERT_TRUE(ImpersonateLoggedOnUser(restricted));
+        subprocs_.Add(kSimpleCommand);
+      },
+      "CreateFile");
+  CloseHandle(restricted);
+}
+#endif  // _WIN32
+
 #ifndef _WIN32
 
 TEST_F(SubprocessTest, InterruptChild) {
