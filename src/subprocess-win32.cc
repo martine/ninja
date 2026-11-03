@@ -24,6 +24,24 @@
 
 using namespace std;
 
+namespace {
+
+/// AppContainers may only create named pipes in \\.\pipe\LOCAL\.
+bool IsRunningInAppContainer() {
+  HANDLE token = NULL;
+  if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    return false;
+  DWORD is_app_container = 0;
+  DWORD length = sizeof(is_app_container);
+  bool result = GetTokenInformation(token, TokenIsAppContainer,
+                                    &is_app_container, length, &length) &&
+                is_app_container;
+  CloseHandle(token);
+  return result;
+}
+
+}  // namespace
+
 Subprocess::Subprocess(bool use_console) : child_(NULL) , overlapped_(),
                                            is_reading_(false),
                                            use_console_(use_console) {
@@ -40,9 +58,14 @@ Subprocess::~Subprocess() {
 }
 
 HANDLE Subprocess::SetupPipe(HANDLE ioport) {
+  static bool in_app_container = IsRunningInAppContainer();
+  const char* pipe_prefix = "\\\\.\\pipe";
+  if (in_app_container)
+    pipe_prefix = "\\\\.\\pipe\\LOCAL";
+
   char pipe_name[100];
-  snprintf(pipe_name, sizeof(pipe_name),
-           "\\\\.\\pipe\\ninja_pid%lu_sp%p", GetCurrentProcessId(), this);
+  snprintf(pipe_name, sizeof(pipe_name), "%s\\ninja_pid%lu_sp%p", pipe_prefix,
+           GetCurrentProcessId(), this);
 
   pipe_ = ::CreateNamedPipeA(pipe_name,
                              PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
