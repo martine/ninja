@@ -2014,14 +2014,15 @@ NORETURN void real_main(int argc, char** argv) {
     if (options.tool && options.tool->when == Tool::RUN_AFTER_LOGS)
       exit((ninja.*options.tool->func)(&options, argc, argv));
 
+    // Note: NinjaMain::RebuildManifest() can return true even if "config.dry_run = true"
     // Attempt to rebuild the manifest before building anything else
     if (ninja.RebuildManifest(options.input_file, &err, status)) {
-      // In dry_run mode the regeneration will succeed without changing the
-      // manifest forever. Better to return immediately.
-      if (config.dry_run)
-        exit(0);
-      // Start the build over with the new manifest.
-      continue;
+      if (!config.dry_run) {
+        // Manifest has been rebuild
+        // Start the build over with the new manifest.
+        continue;
+      }
+      // Manifest has not been rebuild, continue to execute the dry run...
     } else if (!err.empty()) {
       status->Error("rebuilding '%s': %s", options.input_file, err.c_str());
       exit(1);
