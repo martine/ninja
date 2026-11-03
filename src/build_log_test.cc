@@ -230,6 +230,11 @@ struct TestDiskInterface : public DiskInterface {
   TimeStamp Stat(const std::string& path, std::string* err) const override {
     return 4;
   }
+  TimeStamp StatDirectory(const std::string& path,
+                          std::string* err) const override {
+    assert(false);
+    return 0;
+  }
   bool WriteFile(const std::string& path, const std::string& contents,
                  bool crlf_on_windows) override {
     assert(false);
@@ -325,6 +330,105 @@ TEST_F(BuildLogTest, MultiTargetEdge) {
   ASSERT_EQ(22, e2->end_time);
 }
 
+TEST_F(BuildLogTest, MissingDirectories) {
+  AssertParse(&state_,
+"build out out.d: cat present/ missing/ ./missing/ | missing_implicit/ "
+"|| missing_order_only/\n"
+"build out2: cat in\n");
+
+  VirtualFileSystem fs;
+  fs.CreateDir("present");
+  std::string err;
+  for (Node* input : state_.edges_[0]->inputs_) {
+    EXPECT_TRUE(input->StatIfNecessary(&fs, &err));
+  }
+  ASSERT_EQ("", err);
+
+  BuildLog log1;
+  EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
+  ASSERT_EQ("", err);
+  log1.RecordCommand(state_.edges_[0], 15, 18);
+  log1.RecordCommand(state_.edges_[1], 20, 25);
+  log1.Close();
+
+  std::string contents;
+  ReadFile(kTestFilename, &contents, &err);
+  ASSERT_EQ("", err);
+  EXPECT_NE(contents.find("\tout\t"), std::string::npos);
+  EXPECT_NE(contents.find("\nmissing\tout\tmissing/\n"
+                          "missing\tout\tmissing_implicit/\n"),
+            std::string::npos);
+  EXPECT_NE(contents.find("\nmissing\tout.d\tmissing/\n"
+                          "missing\tout.d\tmissing_implicit/\n"),
+            std::string::npos);
+  EXPECT_EQ(contents.find("present/"), std::string::npos);
+  EXPECT_EQ(contents.find("missing_order_only/"), std::string::npos);
+
+  BuildLog log2;
+  EXPECT_TRUE(log2.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  for (BuildLog* log : { &log1, &log2 }) {
+    for (const char* output : { "out", "out.d" }) {
+      EXPECT_TRUE(log->WasDirectoryMissing(output, "missing/"));
+      EXPECT_TRUE(log->WasDirectoryMissing(output, "missing_implicit/"));
+      EXPECT_FALSE(log->WasDirectoryMissing(output, "present/"));
+      EXPECT_FALSE(log->WasDirectoryMissing(output, "missing_order_only/"));
+    }
+    EXPECT_FALSE(log->WasDirectoryMissing("out2", "missing/"));
+  }
+
+  // Recording the command again without missing directories forgets them.
+  fs.CreateDir("missing");
+  fs.CreateDir("missing_implicit");
+  state_.Reset();
+  for (Node* input : state_.edges_[0]->inputs_) {
+    EXPECT_TRUE(input->StatIfNecessary(&fs, &err));
+  }
+  EXPECT_TRUE(log2.OpenForWrite(kTestFilename, *this, &err));
+  log2.RecordCommand(state_.edges_[0], 30, 35);
+  log2.Close();
+  EXPECT_FALSE(log2.WasDirectoryMissing("out", "missing/"));
+
+  BuildLog log3;
+  EXPECT_TRUE(log3.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  EXPECT_FALSE(log3.WasDirectoryMissing("out", "missing/"));
+  EXPECT_FALSE(log3.WasDirectoryMissing("out.d", "missing_implicit/"));
+}
+
+TEST_F(BuildLogTest, MissingDirectoriesLoad) {
+  FILE* f = fopen(kTestFilename, "wb");
+  fprintf(f, "# ninja log v7\n");
+  fprintf(f, "0\t1\t2\tout\t%" PRIx64 "\n",
+      BuildLog::LogEntry::HashCommand("command"));
+  fprintf(f, "missing\tout\ta dir/\n");
+  // Ignored: unknown output, missing directory.
+  fprintf(f, "missing\tunknown\tb/\n");
+  fprintf(f, "missing\tout\t\n");
+  fprintf(f, "missing\tout\n");
+  fprintf(f, "0\t1\t2\tout2\t%" PRIx64 "\n",
+      BuildLog::LogEntry::HashCommand("command2"));
+  fprintf(f, "missing\tout2\tc/\n");
+  // A newer entry replaces the missing directories of the older one.
+  fprintf(f, "3\t4\t5\tout2\t%" PRIx64 "\n",
+      BuildLog::LogEntry::HashCommand("command2"));
+  fclose(f);
+
+  std::string err;
+  BuildLog log;
+  EXPECT_TRUE(log.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  ASSERT_EQ(2u, log.entries().size());
+  EXPECT_FALSE(log.LookupByOutput("unknown"));
+  EXPECT_TRUE(log.WasDirectoryMissing("out", "a dir/"));
+  EXPECT_FALSE(log.WasDirectoryMissing("out", ""));
+  EXPECT_FALSE(log.WasDirectoryMissing("unknown", "b/"));
+  EXPECT_FALSE(log.WasDirectoryMissing("out2", "c/"));
+  BuildLog::LogEntry* e = log.LookupByOutput("out");
+  ASSERT_TRUE(e);
+  ASSERT_NO_FATAL_FAILURE(AssertHash("command", e->command_hash));
+}
+
 struct BuildLogRecompactTest : public BuildLogTest {
   virtual bool IsPathDead(StringPiece s) const { return s == "out2"; }
 };
@@ -363,6 +467,42 @@ TEST_F(BuildLogRecompactTest, Recompact) {
   ASSERT_EQ(1u, log2.entries().size());
   ASSERT_TRUE(log2.LookupByOutput("out"));
   ASSERT_FALSE(log2.LookupByOutput("out2"));
+}
+
+TEST_F(BuildLogRecompactTest, RecompactMissingDirectories) {
+  AssertParse(&state_,
+"build out: cat dir/\n"
+"build out2: cat dir/\n");
+  state_.LookupNode("dir/")->MarkMissing();
+
+  BuildLog log1;
+  std::string err;
+  EXPECT_TRUE(log1.OpenForWrite(kTestFilename, *this, &err));
+  ASSERT_EQ("", err);
+  for (int i = 0; i < 200; ++i) {
+    log1.RecordCommand(state_.edges_[0], 15, 18 + i);
+  }
+  log1.RecordCommand(state_.edges_[1], 21, 22);
+  log1.Close();
+
+  BuildLog log2;
+  EXPECT_TRUE(log2.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  EXPECT_TRUE(log2.WasDirectoryMissing("out2", "dir/"));
+  EXPECT_TRUE(log2.OpenForWrite(kTestFilename, *this, &err));
+  log2.Close();
+  EXPECT_FALSE(log2.WasDirectoryMissing("out2", "dir/"));
+
+  std::string contents;
+  ReadFile(kTestFilename, &contents, &err);
+  ASSERT_EQ("", err);
+  EXPECT_EQ(contents.find("out2"), std::string::npos);
+
+  BuildLog log3;
+  EXPECT_TRUE(log3.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  ASSERT_EQ(1u, log3.entries().size());
+  EXPECT_TRUE(log3.WasDirectoryMissing("out", "dir/"));
 }
 
 }  // anonymous namespace

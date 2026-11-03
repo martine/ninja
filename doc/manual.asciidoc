@@ -1237,19 +1237,22 @@ update it whenever entries are added to, removed from or renamed in the
 directory, but not when the contents of a file inside it change.
 
 Unlike other inputs, a directory input never fails the build, even if the
-directory doesn't exist. Instead, Ninja uses the modification time of its
-nearest existing ancestor (or of the current directory). This way:
+directory doesn't exist. A path that exists but isn't a directory (e.g. a
+regular file) is treated like a missing directory. Instead of failing, Ninja
+records in its build log which directory inputs were missing when the command
+of an edge last ran. This way:
 
-* creating the directory makes the dependent edges dirty, as its modification
-  time is newer than their outputs,
-* removing the directory makes them dirty, as this updates the modification
-  time of its parent,
-* a directory that doesn't exist and never did doesn't make them dirty on every
-  run.
+* creating the directory makes the dependent edges dirty, even if it has an
+  older modification time than their outputs (e.g. because it was moved there),
+* removing the directory makes them dirty,
+* a directory that doesn't exist and never did doesn't make them dirty, no
+  matter what happens to its parent directory.
 
-Note that a directory input (or, while it's missing, its nearest existing
-ancestor) must not be a directory that the build itself writes to, as this
-would make the dependent edges dirty again after each run.
+This applies to edges of `generator` rules too, although they are not rebuilt
+when only their command line changes.
+
+Note that a directory input must not be a directory that the build itself
+writes to, as this would make the dependent edges dirty again after each run.
 
 Without the trailing separator (e.g. `src/optional`), a path is a regular input,
 which may point to a directory too, but which fails the build if it's missing.

@@ -129,6 +129,11 @@ class RecomputeOutputsDirtyCache {
   bool RecomputeOutputDirty(const Node* output, const Node* most_recent_input,
                             CachedLogEntry& entry);
 
+  /// Checks whether a directory input of `edge_` (see Node::is_directory()) was
+  /// created or removed since `output` was last built, according to the build
+  /// log. Returns true if so.
+  bool DirectoryInputChanged(const Node* output);
+
   /// Dirty check for phony edges.
   /// Returns true if dirty.
   bool Phony(Node* output, const Node* most_recent_input) const;
@@ -142,6 +147,9 @@ class RecomputeOutputsDirtyCache {
   bool generatorValid_ = false;
   std::vector<CachedLogEntry> logEntry_;
   LazyEdgeCommandHash commandHash_ = LazyEdgeCommandHash(edge_);
+  /// Directory inputs of `edge_`, collected on first use.
+  std::vector<const Node*> directoryInputs_;
+  bool directoryInputsValid_ = false;
 
 #ifndef NDEBUG
   std::vector<const Node*> checkOutputs_;
@@ -186,6 +194,32 @@ bool RecomputeOutputsDirtyCache::depfile(const Node* most_recent_input) {
     if (RecomputeOutputDirty<false>(edge_->outputs_[i], most_recent_input,
                                     logEntry_[i]))
       return true;
+  }
+  return false;
+}
+
+bool RecomputeOutputsDirtyCache::DirectoryInputChanged(const Node* output) {
+  if (!directoryInputsValid_) {
+    directoryInputsValid_ = true;
+    for (std::size_t i = 0; i != edge_->inputs_.size(); ++i) {
+      if (edge_->inputs_[i]->is_directory() &&
+          i < edge_->inputs_.size() - edge_->order_only_deps_) {
+        directoryInputs_.push_back(edge_->inputs_[i]);
+      }
+    }
+  }
+
+  for (const Node* input : directoryInputs_) {
+    const bool was_missing =
+        buildLog_->WasDirectoryMissing(output->path(), input->path());
+    if (was_missing == input->exists()) {
+      explanations_.Record(output,
+                           "directory input %s was %s since %s was last built",
+                           input->path().c_str(),
+                           was_missing ? "created" : "removed",
+                           output->path().c_str());
+      return true;
+    }
   }
   return false;
 }
@@ -265,6 +299,11 @@ bool RecomputeOutputsDirtyCache::RecomputeOutputDirty(
                              output->path().c_str());
         return true;
       }
+      // Unlike the command line, this applies to generator rules too, as they
+      // often expand globs in directory inputs.
+      IF_FIRSTRUN (DirectoryInputChanged(output)) {
+        return true;
+      }
       if (most_recent_input && entry->mtime < most_recent_input->mtime()) {
         // May also be dirty due to the mtime in the log being older than the
         // mtime of the most recent input.  This can occur even when the mtime
@@ -293,8 +332,9 @@ bool RecomputeOutputsDirtyCache::RecomputeOutputDirty(
 }  // namespace
 
 bool Node::Stat(DiskInterface* disk_interface, string* err) {
-  if (is_directory())
+  if (is_directory()) {
     return StatDirectory(disk_interface, err);
+  }
   mtime_ = disk_interface->Stat(path_, err);
   if (mtime_ == -1) {
     return false;
@@ -303,34 +343,20 @@ bool Node::Stat(DiskInterface* disk_interface, string* err) {
   return true;
 }
 
-bool Node::StatDirectory(DiskInterface* disk_interface, string* err) {
+bool Node::StatDirectory(DiskInterface* disk_interface, std::string* err) {
   // Stat the directory without its trailing slash, which not every
   // DiskInterface implementation handles. Its mtime changes whenever entries
   // are added to, removed from or renamed in it.
-  string dir = path_.size() > 1 ? path_.substr(0, path_.size() - 1) : path_;
-  mtime_ = disk_interface->Stat(dir, err);
+  std::string dir =
+      path_.size() > 1 ? path_.substr(0, path_.size() - 1) : path_;
+  mtime_ = disk_interface->StatDirectory(dir, err);
   if (mtime_ == -1) {
     return false;
   }
+  // A missing directory, or a path that isn't a directory, is not an error and
+  // has an mtime of 0. Whether it was created or removed since the last build
+  // is tracked in the build log.
   exists_ = (mtime_ != 0) ? ExistenceStatusExists : ExistenceStatusMissing;
-
-  // A missing directory is not an error. Use the mtime of the nearest existing
-  // ancestor instead: removing the directory updates its parent's mtime, so
-  // dependents still become dirty, while a directory that never existed doesn't
-  // make them dirty on every run.
-  while (mtime_ == 0 && dir != "." && dir != "/") {
-    string::size_type slash_pos = dir.find_last_of('/');
-    if (slash_pos == string::npos)
-      dir = ".";
-    else if (slash_pos == 0)
-      dir = "/";
-    else
-      dir.resize(slash_pos);
-    mtime_ = disk_interface->Stat(dir, err);
-    if (mtime_ == -1) {
-      return false;
-    }
-  }
   return true;
 }
 

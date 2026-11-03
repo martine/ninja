@@ -15,7 +15,9 @@
 #include "graph.h"
 
 #include "build.h"
+#include "build_log.h"
 #include "command_collector.h"
+#include "explanations.h"
 #include "test.h"
 
 using namespace std;
@@ -1278,12 +1280,12 @@ TEST_F(GraphTest, DirectoryInputParsed) {
 TEST_F(GraphTest, DirectoryInputDirty) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "build out: cat indir/\n"));
-  fs_.Create("indir", "");
+  fs_.CreateDir("indir");
   fs_.Create("out", "");
   fs_.Tick();
-  fs_.Create("indir", "");
+  fs_.CreateDir("indir");
 
-  string err;
+  std::string err;
   EXPECT_TRUE(scan_.RecomputeDirty(GetNode("out"), NULL, &err));
   ASSERT_EQ("", err);
   EXPECT_FALSE(state_.LookupNode("indir/")->dirty());
@@ -1293,32 +1295,32 @@ TEST_F(GraphTest, DirectoryInputDirty) {
 TEST_F(GraphTest, DirectoryInputUpToDate) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "build out: cat indir/\n"));
-  fs_.Create("indir", "");
+  fs_.CreateDir("indir");
   fs_.Tick();
   fs_.Create("out", "");
 
-  string err;
+  std::string err;
   EXPECT_TRUE(scan_.RecomputeDirty(GetNode("out"), NULL, &err));
   ASSERT_EQ("", err);
   EXPECT_FALSE(GetNode("out")->dirty());
 }
 
 // A directory that doesn't exist is neither an error nor does it make its
-// dependents dirty, as long as its parent didn't change.
+// dependents dirty.
 TEST_F(GraphTest, DirectoryInputMissing) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "build out: cat src/optional/\n"));
-  fs_.Create("src", "");
+  fs_.CreateDir("src");
   fs_.Tick();
   fs_.Create("out", "");
 
-  string err;
+  std::string err;
   EXPECT_TRUE(scan_.RecomputeDirty(GetNode("out"), NULL, &err));
   ASSERT_EQ("", err);
   Node* dir_node = state_.LookupNode("src/optional/");
   EXPECT_FALSE(dir_node->exists());
   EXPECT_FALSE(dir_node->dirty());
-  EXPECT_EQ(1, dir_node->mtime());
+  EXPECT_EQ(0, dir_node->mtime());
   EXPECT_FALSE(GetNode("out")->dirty());
 
   // Building doesn't fail with "missing and no known rule to make it".
@@ -1327,35 +1329,93 @@ TEST_F(GraphTest, DirectoryInputMissing) {
   EXPECT_EQ("", err);
 }
 
-// Removing a directory updates the mtime of its parent, which makes the
-// dependents dirty.
-TEST_F(GraphTest, DirectoryInputRemoved) {
+// The build log records which directory inputs were missing. Creating or
+// removing one makes its dependents dirty, regardless of any mtimes and even
+// for generator rules.
+TEST_F(GraphTest, DirectoryInputCreatedOrRemoved) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
-"build out: cat src/optional/\n"));
+"rule gen\n"
+"  command = gen\n"
+"  generator = 1\n"
+"build out: gen src/optional/\n"));
+  fs_.CreateDir("src");
   fs_.Create("out", "");
-  fs_.Tick();
-  fs_.Create("src", "");  // "src/optional" was removed.
+  Node* out = GetNode("out");
+  BuildLog build_log;
 
-  string err;
-  EXPECT_TRUE(scan_.RecomputeDirty(GetNode("out"), NULL, &err));
-  ASSERT_EQ("", err);
-  EXPECT_FALSE(state_.LookupNode("src/optional/")->dirty());
-  EXPECT_TRUE(GetNode("out")->dirty());
+  // Returns the explanations of why |out| is dirty.
+  auto recompute_dirty = [&]() {
+    state_.Reset();
+    Explanations explanations;
+    DependencyScan scan(&state_, &build_log, NULL, &fs_, NULL, &explanations);
+    std::string err;
+    EXPECT_TRUE(scan.RecomputeDirty(out, NULL, &err));
+    EXPECT_EQ("", err);
+    std::vector<std::string> result;
+    explanations.LookupAndAppend(out, &result);
+    EXPECT_EQ(!result.empty(), out->dirty());
+    return result;
+  };
+
+  // Generator rules aren't dirty because they're missing from the log.
+  EXPECT_TRUE(recompute_dirty().empty());
+  build_log.RecordCommand(out->in_edge(), 0, 0, out->mtime());
+  EXPECT_TRUE(build_log.WasDirectoryMissing("out", "src/optional/"));
+  EXPECT_TRUE(recompute_dirty().empty());
+
+  // Something else changes the parent directory, e.g. a sibling is created.
+  fs_.Tick();
+  fs_.CreateDir("src");
+  EXPECT_TRUE(recompute_dirty().empty());
+
+  // The directory is created, e.g. by moving it there, which keeps its old
+  // mtime.
+  fs_.CreateDir("src/optional");
+  fs_.files_["src/optional"].mtime = 1;
+  EXPECT_EQ(
+      std::vector<std::string>(1, "directory input src/optional/ was created "
+                                  "since out was last built"),
+      recompute_dirty());
+
+  build_log.RecordCommand(out->in_edge(), 0, 0, out->mtime());
+  EXPECT_TRUE(recompute_dirty().empty());
+  EXPECT_FALSE(build_log.WasDirectoryMissing("out", "src/optional/"));
+
+  fs_.RemoveFile("src/optional");
+  EXPECT_EQ(
+      std::vector<std::string>(1, "directory input src/optional/ was removed "
+                                  "since out was last built"),
+      recompute_dirty());
+
+  // A file is treated like a missing directory, so neither its creation nor
+  // its mtime matter.
+  build_log.RecordCommand(out->in_edge(), 0, 0, out->mtime());
+  fs_.Tick();
+  fs_.Create("src/optional", "");
+  EXPECT_TRUE(recompute_dirty().empty());
+  EXPECT_FALSE(state_.LookupNode("src/optional/")->exists());
+  EXPECT_EQ(0, state_.LookupNode("src/optional/")->mtime());
 }
 
-// If no ancestor exists, the current directory is used.
-TEST_F(GraphTest, DirectoryInputMissingAncestors) {
+// Order-only directory inputs don't affect the dirty state.
+TEST_F(GraphTest, DirectoryInputOrderOnly) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
-"build out: cat a/b/c/\n"));
+"build out: cat in || dir/\n"));
+  fs_.Create("in", "");
   fs_.Create("out", "");
-  fs_.Tick();
-  fs_.Create(".", "");
+  Node* out = GetNode("out");
+  BuildLog build_log;
+  DependencyScan scan(&state_, &build_log, NULL, &fs_, NULL, NULL);
+  std::string err;
+  EXPECT_TRUE(scan.RecomputeDirty(out, NULL, &err));
+  build_log.RecordCommand(out->in_edge(), 0, 0, out->mtime());
+  EXPECT_FALSE(build_log.WasDirectoryMissing("out", "dir/"));
 
-  string err;
-  EXPECT_TRUE(scan_.RecomputeDirty(GetNode("out"), NULL, &err));
+  state_.Reset();
+  fs_.CreateDir("dir");
+  EXPECT_TRUE(scan.RecomputeDirty(out, NULL, &err));
   ASSERT_EQ("", err);
-  EXPECT_EQ(2, state_.LookupNode("a/b/c/")->mtime());
-  EXPECT_TRUE(GetNode("out")->dirty());
+  EXPECT_FALSE(out->dirty());
 }
 
 #ifdef _WIN32

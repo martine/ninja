@@ -23,6 +23,7 @@
 #include "build_log.h"
 #include "disk_interface.h"
 
+#include <algorithm>
 #include <cassert>
 #include <errno.h>
 #include <stdlib.h>
@@ -47,10 +48,15 @@
 // older runs.
 // Once the number of redundant entries exceeds a threshold, we write
 // out a new file and replace the existing one with it.
+//
+// An entry may be followed by "missing\t<output>\t<directory>" lines, one for
+// each directory input that was missing when the command for the output ran.
+// Older versions of Ninja ignore these lines, as they have too few fields.
 
 namespace {
 
 const char kFileSignature[] = "# ninja log v%d\n";
+const char kMissingDirectoryPrefix[] = "missing\t";
 const int kOldestSupportedVersion = 7;
 const int kCurrentVersion = 7;
 
@@ -91,6 +97,16 @@ bool BuildLog::RecordCommand(Edge* edge, int start_time, int end_time,
                              TimeStamp mtime) {
   std::string command = edge->EvaluateCommand(true);
   uint64_t command_hash = LogEntry::HashCommand(command);
+  std::vector<std::string> missing_dirs;
+  for (size_t i = 0; i < edge->inputs_.size(); ++i) {
+    const Node* input = edge->inputs_[i];
+    if (input->is_directory() && !edge->is_order_only(i) &&
+        input->status_known() && !input->exists() &&
+        std::find(missing_dirs.begin(), missing_dirs.end(), input->path()) ==
+            missing_dirs.end()) {
+      missing_dirs.push_back(input->path());
+    }
+  }
   for (std::vector<Node*>::iterator out = edge->outputs_.begin();
        out != edge->outputs_.end(); ++out) {
     const std::string& path = (*out)->path();
@@ -107,6 +123,11 @@ bool BuildLog::RecordCommand(Edge* edge, int start_time, int end_time,
     log_entry->start_time = start_time;
     log_entry->end_time = end_time;
     log_entry->mtime = mtime;
+    if (!missing_dirs.empty()) {
+      missing_dirs_[log_entry->output] = missing_dirs;
+    } else if (!missing_dirs_.empty()) {
+      missing_dirs_.erase(log_entry->output);
+    }
 
     if (!OpenForWriteIfNeeded()) {
       return false;
@@ -250,6 +271,27 @@ LoadStatus BuildLog::Load(const std::string& path, std::string* err) {
 
     const char kFieldSeparator = '\t';
 
+    const size_t kMissingDirectoryPrefixLen =
+        sizeof(kMissingDirectoryPrefix) - 1;
+    if (static_cast<size_t>(line_end - line_start) >
+            kMissingDirectoryPrefixLen &&
+        memcmp(line_start, kMissingDirectoryPrefix,
+               kMissingDirectoryPrefixLen) == 0) {
+      char* output_start = line_start + kMissingDirectoryPrefixLen;
+      char* output_end = static_cast<char*>(
+          memchr(output_start, kFieldSeparator, line_end - output_start));
+      if (!output_end || output_end + 1 == line_end) {
+        continue;
+      }
+      Entries::iterator i = entries_.find(
+          StringPiece(output_start, output_end - output_start));
+      if (i == entries_.end()) {
+        continue;
+      }
+      missing_dirs_[i->second->output].emplace_back(output_end + 1, line_end);
+      continue;
+    }
+
     char* start = line_start;
     char* end = static_cast<char*>(memchr(start, kFieldSeparator, line_end - start));
     if (!end)
@@ -299,6 +341,10 @@ LoadStatus BuildLog::Load(const std::string& path, std::string* err) {
     entry->start_time = start_time;
     entry->end_time = end_time;
     entry->mtime = mtime;
+    // Missing directories of a previous run of this command are outdated.
+    if (!missing_dirs_.empty()) {
+      missing_dirs_.erase(entry->output);
+    }
     char c = *end; *end = '\0';
     entry->command_hash = (uint64_t)strtoull(start, NULL, 16);
     *end = c;
@@ -331,10 +377,39 @@ BuildLog::LogEntry* BuildLog::LookupByOutput(const std::string& path) const{
   return NULL;
 }
 
+bool BuildLog::WasDirectoryMissing(const std::string& output,
+                                   const std::string& dir) const {
+  if (missing_dirs_.empty()) {
+    return false;
+  }
+  MissingDirectories::const_iterator i = missing_dirs_.find(output);
+  if (i == missing_dirs_.end()) {
+    return false;
+  }
+  return std::find(i->second.begin(), i->second.end(), dir) !=
+         i->second.end();
+}
+
 bool BuildLog::WriteEntry(FILE* f, const LogEntry& entry) {
-  return fprintf(f, "%d\t%d\t%" PRId64 "\t%s\t%" PRIx64 "\n",
-          entry.start_time, entry.end_time, entry.mtime,
-          entry.output.c_str(), entry.command_hash) > 0;
+  if (fprintf(f, "%d\t%d\t%" PRId64 "\t%s\t%" PRIx64 "\n",
+              entry.start_time, entry.end_time, entry.mtime,
+              entry.output.c_str(), entry.command_hash) <= 0) {
+    return false;
+  }
+  if (missing_dirs_.empty()) {
+    return true;
+  }
+  MissingDirectories::const_iterator i = missing_dirs_.find(entry.output);
+  if (i == missing_dirs_.end()) {
+    return true;
+  }
+  for (const std::string& dir : i->second) {
+    if (fprintf(f, "%s%s\t%s\n", kMissingDirectoryPrefix,
+                entry.output.c_str(), dir.c_str()) <= 0) {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool BuildLog::Recompact(const std::string& path, const BuildLogUser& user,
@@ -369,8 +444,11 @@ bool BuildLog::Recompact(const std::string& path, const BuildLogUser& user,
     }
   }
 
-  for (StringPiece output : dead_outputs)
+  for (StringPiece output : dead_outputs) {
+    // |output| points into the entry, so erase it from |missing_dirs_| first.
+    missing_dirs_.erase(output);
     entries_.erase(output);
+  }
 
   fclose(f);
 

@@ -287,6 +287,32 @@ TimeStamp RealDiskInterface::Stat(const string& path, string* err) const {
 #endif
 }
 
+TimeStamp RealDiskInterface::StatDirectory(const std::string& path,
+                                           std::string* err) const {
+#ifdef _WIN32
+  // Stat() may use the cache, which only holds mtimes, so check the type
+  // separately.
+  TimeStamp mtime = Stat(path, err);
+  if (mtime <= 0) {
+    return mtime;
+  }
+  DWORD attrs = GetFileAttributesA(path.c_str());
+  if (attrs == INVALID_FILE_ATTRIBUTES) {
+    DWORD win_err = GetLastError();
+    if (win_err == ERROR_FILE_NOT_FOUND || win_err == ERROR_PATH_NOT_FOUND) {
+      return 0;
+    }
+    *err = "GetFileAttributesA(" + path + "): " + GetLastErrorString();
+    return -1;
+  }
+  return (attrs & FILE_ATTRIBUTE_DIRECTORY) ? mtime : 0;
+#else
+  // With a trailing slash, stat() fails with ENOTDIR if |path| isn't a
+  // directory, which Stat() treats as missing.
+  return Stat(path + "/", err);
+#endif
+}
+
 bool RealDiskInterface::WriteFile(const string& path, const string& contents,
                                   bool crlf_on_windows) {
   FILE* fp = fopen(path.c_str(),

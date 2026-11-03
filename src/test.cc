@@ -146,7 +146,14 @@ void VirtualFileSystem::Create(const string& path,
                                const string& contents) {
   files_[path].mtime = now_;
   files_[path].contents = contents;
+  files_[path].directory = false;
   files_created_.insert(path);
+}
+
+void VirtualFileSystem::CreateDir(const std::string& path) {
+  files_[path].mtime = now_;
+  files_[path].contents.clear();
+  files_[path].directory = true;
 }
 
 TimeStamp VirtualFileSystem::Stat(const string& path, string* err) const {
@@ -160,6 +167,16 @@ TimeStamp VirtualFileSystem::Stat(const string& path, string* err) const {
     return i->second.mtime;
   }
   return 0;
+}
+
+TimeStamp VirtualFileSystem::StatDirectory(const std::string& path,
+                                           std::string* err) const {
+  FileMap::const_iterator i = files_.find(path);
+  if (i != files_.end() && !i->second.directory &&
+      i->second.stat_error.empty()) {
+    return 0;
+  }
+  return Stat(path, err);
 }
 
 bool VirtualFileSystem::WriteFile(const string& path, const string& contents,

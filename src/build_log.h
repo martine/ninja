@@ -19,6 +19,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "hash_map.h"
 #include "load_status.h"
@@ -42,6 +43,8 @@ struct BuildLogUser {
 ///    when we need to rebuild due to the command changing
 /// 2) timing information, perhaps for generating reports
 /// 3) restat information
+/// 4) which directory inputs were missing, so we know when we need to rebuild
+///    due to one being created or removed
 struct BuildLog {
   BuildLog();
   ~BuildLog();
@@ -81,7 +84,13 @@ struct BuildLog {
   /// Lookup a previously-run command by its output path.
   LogEntry* LookupByOutput(const std::string& path) const;
 
-  /// Serialize an entry into a log file.
+  /// Return whether the directory input |dir| (see Node::is_directory()) was
+  /// missing when the command for |output| last ran.
+  bool WasDirectoryMissing(const std::string& output,
+                           const std::string& dir) const;
+
+  /// Serialize an entry, followed by the directory inputs that were missing
+  /// for it, into a log file.
   bool WriteEntry(FILE* f, const LogEntry& entry);
 
   /// Rewrite the known log entries, throwing away old data.
@@ -101,6 +110,14 @@ struct BuildLog {
   bool OpenForWriteIfNeeded();
 
   Entries entries_;
+
+  /// Directory inputs that were missing when the command for an output last
+  /// ran. Only contains outputs with at least one missing directory input.
+  /// The keys point to LogEntry::output in |entries_|.
+  typedef ExternalStringHashMap<std::vector<std::string>>::Type
+      MissingDirectories;
+  MissingDirectories missing_dirs_;
+
   FILE* log_file_ = nullptr;
   std::string log_file_path_;
   bool needs_recompaction_ = false;

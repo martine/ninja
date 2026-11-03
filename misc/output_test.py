@@ -746,6 +746,9 @@ build out: touch src/optional/
 
             assert_builds(True)
             assert_builds(False)
+            # Changing the parent of the missing directory doesn't matter.
+            open(os.path.join(b.path, 'src', 'sibling'), 'w').close()
+            assert_builds(False)
             os.mkdir(optional)
             assert_builds(True)
             assert_builds(False)

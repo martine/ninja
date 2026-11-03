@@ -34,7 +34,7 @@ namespace {
 
 /// Like CanonicalizePath(), but keeps a trailing path separator, which marks
 /// the input as a directory (see Node::is_directory()).
-void CanonicalizeInputPath(string* path, uint64_t* slash_bits) {
+void CanonicalizeInputPath(std::string* path, uint64_t* slash_bits) {
   const char last = path->back();
 #ifdef _WIN32
   const bool is_directory = last == '/' || last == '\\';
@@ -42,13 +42,15 @@ void CanonicalizeInputPath(string* path, uint64_t* slash_bits) {
   const bool is_directory = last == '/';
 #endif
   CanonicalizePath(path, slash_bits);
-  if (!is_directory || path->back() == '/')
+  if (!is_directory || path->back() == '/') {
     return;
+  }
 #ifdef _WIN32
   if (last == '\\') {
-    const size_t slash_count = count(path->begin(), path->end(), '/');
-    if (slash_count < 64)
+    const size_t slash_count = std::count(path->begin(), path->end(), '/');
+    if (slash_count < 64) {
       *slash_bits |= uint64_t(1) << slash_count;
+    }
   }
 #endif
   path->push_back('/');
