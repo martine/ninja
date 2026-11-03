@@ -55,9 +55,16 @@ struct PlanTest : public StateTestWithBuiltinRules {
   }
 
   void PrepareForTarget(const char* node, BuildLog *log=NULL) {
-    string err;
-    EXPECT_TRUE(plan_.AddTarget(GetNode(node), &err));
-    ASSERT_EQ("", err);
+    PrepareForTargets({node}, log);
+  }
+
+  void PrepareForTargets(std::initializer_list<const char*> nodes,
+                         BuildLog* log = nullptr) {
+    std::string err;
+    for (const char* node : nodes) {
+      EXPECT_TRUE(plan_.AddTarget(GetNode(node), &err));
+      ASSERT_EQ("", err);
+    }
     plan_.PrepareQueue();
     ASSERT_TRUE(plan_.more_to_do());
   }
@@ -504,6 +511,52 @@ TEST_F(PlanTest, PriorityWithoutBuildLog) {
   const int n_edges = 5;
   const char *expected_order[n_edges] = {
     "a1", "a0", "b0", "c0", "out"};
+  for (int i = 0; i < n_edges; ++i) {
+    Edge* edge = plan_.FindWork();
+    ASSERT_TRUE(edge != nullptr);
+    EXPECT_EQ(expected_order[i], edge->outputs_[0]->path());
+
+    std::string err;
+    ASSERT_TRUE(plan_.EdgeFinished(edge, Plan::kEdgeSucceeded, &err));
+    EXPECT_EQ(err, "");
+  }
+
+  EXPECT_FALSE(plan_.FindWork());
+}
+
+TEST_F(PlanTest, PriorityWithoutBuildLog_MultipleTargets) {
+  // same graph as above, but building multiple targets
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+    "rule r\n"
+    "  command = unused\n"
+    "build out: r a0 b0 c0\n"
+    "build a0: r a1\n"
+    "build a1: r a2\n"
+    "build b0: r b1\n"
+    "build c0: r b1\n"
+  ));
+  GetNode("a1")->MarkDirty();
+  GetNode("a0")->MarkDirty();
+  GetNode("b0")->MarkDirty();
+  GetNode("c0")->MarkDirty();
+  GetNode("out")->MarkDirty();
+  BuildLog log;
+  // build c0 explicitly as first target, mimicking a `ninja c0 out` CLI run
+  PrepareForTargets({"c0", "out"}, &log);
+
+  // c0  is the 1st out of N=2 targets => edge gets (N-0)<<32 as target-order-specific weight
+  EXPECT_EQ(GetNode("c0")->in_edge()->critical_path_weight(),  int64_t(2) << 32);
+  // out is the 2nd out of N=2 targets => edge gets (N-1)<<32 as target-order-specific weight
+  EXPECT_EQ(GetNode("out")->in_edge()->critical_path_weight(), int64_t(1) << 32);
+  // the weights propagate to the parent edges
+  EXPECT_EQ(GetNode("a0")->in_edge()->critical_path_weight(), (int64_t(1) << 32) + 1);
+  EXPECT_EQ(GetNode("b0")->in_edge()->critical_path_weight(), (int64_t(1) << 32) + 1);
+  EXPECT_EQ(GetNode("a1")->in_edge()->critical_path_weight(), (int64_t(1) << 32) + 2);
+
+  const int n_edges = 5;
+  // => c0 is scheduled first, not 4th
+  const char *expected_order[n_edges] = {
+    "c0", "a1", "a0", "b0", "out"};
   for (int i = 0; i < n_edges; ++i) {
     Edge* edge = plan_.FindWork();
     ASSERT_TRUE(edge != nullptr);

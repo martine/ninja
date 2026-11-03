@@ -541,11 +541,30 @@ void Plan::ComputeCriticalPath() {
 
   const auto& sorted_edges = topo_sort.result();
 
-  // First, reset all weights to 1.
+  // First, reset all weights to the previous elapsed time,
+  // falling back to 1 if unavailable, or 0 for phony edges.
   for (Edge* edge : sorted_edges)
     edge->set_critical_path_weight(EdgeWeightHeuristic(edge));
 
-  // Second propagate / increment weights from
+  // Secondly, override the weights of edges producing the targets,
+  // based on the (reversed) targets order - but only if the edge
+  // doesn't have a valid previous elapsed time yet.
+  // This enables tweaking the scheduling order of first-time builds
+  // (without previous build times) via explicit targets in the ninja
+  // command-line, e.g., by prepending long-running outputs.
+  const int64_t n_targets = targets_.size();
+  if (n_targets > 1) {
+    // process the targets in reversed order, so that shared in edges
+    // get the max weight of the target with lowest index
+    for (int64_t i = n_targets - 1; i >= 0; --i) {
+      if (auto edge = targets_[i]->in_edge()) {
+        if (edge->is_phony() || edge->prev_elapsed_time_millis < 0)
+          edge->set_critical_path_weight((n_targets - i) << 32);
+      }
+    }
+  }
+
+  // Third propagate / increment weights from
   // children to parents. Scan the list
   // in reverse order to do so.
   for (auto reverse_it = sorted_edges.rbegin();
