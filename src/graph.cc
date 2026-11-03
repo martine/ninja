@@ -359,32 +359,32 @@ bool DependencyScan::RecomputeEdgesInputsDirty(
     const Node* node, EdgeInputsRange input_range, Node*& most_recent_input,
     bool& dirty, std::vector<Node*>* stack,
     std::vector<Node*>* validation_nodes, std::string* err) {
-  const auto& edge = input_range.edge_;
+  Edge* edge = input_range.GetEdge();
 
   // Visit all specified inputs before checking if any of them is ready.
   // Newly encountered edges may load dyndep files and gain
   // outputs that correspond to some of our inputs.
-  for (auto i : input_range) {
-    if (!RecomputeNodeDirty(i, stack, validation_nodes, err))
+  for (size_t i = 0; i < input_range.size(); ++i) {
+    if (!RecomputeNodeDirty(input_range[i], stack, validation_nodes, err))
       return false;
   }
 
-  for (auto i = input_range.begin(); i != input_range.end(); ++i) {
+  for (size_t i = 0; i < input_range.size(); ++i) {
     // If an input is not ready, neither are our outputs.
-    if (Edge* in_edge = (*i)->in_edge()) {
+    if (Edge* in_edge = input_range[i]->in_edge()) {
       if (!in_edge->outputs_ready_)
         edge->outputs_ready_ = false;
     }
 
-    if (!edge->is_order_only(i - edge->inputs_.cbegin())) {
+    if (!edge->is_order_only(i)) {
       // If a regular input is dirty (or missing), we're dirty.
       // Otherwise consider mtime.
-      if ((*i)->dirty()) {
-        explanations_.Record(node, "%s is dirty", (*i)->path().c_str());
+      if (input_range[i]->dirty()) {
+        explanations_.Record(node, "%s is dirty", input_range[i]->path().c_str());
         dirty = true;
       } else {
-        if (!most_recent_input || (*i)->mtime() > most_recent_input->mtime()) {
-          most_recent_input = *i;
+        if (!most_recent_input || input_range[i]->mtime() > most_recent_input->mtime()) {
+          most_recent_input = input_range[i];
         }
       }
     }

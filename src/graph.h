@@ -348,29 +348,51 @@ struct ImplicitDepLoader {
 ///
 /// A default-constructed `EdgeInputsRange` spans the entire
 /// `edge->inputs_` vector.
+///
+/// Memory safety
+/// beg_/end_ are index offsets, not iterators. Access
+/// always goes through index edge_->inputs_[...].
+/// The range stays valid even if edge_->inputs_ reallocates later
+/// (e.g. via dyndep loading)
+///   ***********************************************
+///   /* undefined behavior on realloc for edge->inputs_ in foo. */
+///   for (Node* i : edge->inputs_) foo(i);
+///   /* works fine even on realloc for edge->inputs_ in foo. */
+///   EdgeInputsRange range(edge);
+///   for (size_t i = 0; i < range.size(); ++i) foo(range[i]);
+///   ***********************************************
+/// Appending inputs to edge is safe, if new elements are guaranteed to be
+/// appended after end_.
+/// This matches for ranges that exclude order-only inputs (depfile-loaded
+/// inputs are implicit), where dyndep then appends further implicit inputs.
 struct EdgeInputsRange {
   using const_iterator = std::vector<Node*>::const_iterator;
 
   /// Create new instance covering all |edge| inputs.
-  EdgeInputsRange(Edge* edge)
-      : edge_(edge), beg_(edge->inputs_.begin()), end_(edge->inputs_.end()) {}
+  explicit EdgeInputsRange(Edge* edge)
+      : edge_(edge), beg_(0), end_(edge->inputs_.size()),
+        size_(edge->inputs_.size()) {}
 
   EdgeInputsRange(Edge* edge, const_iterator beg, const_iterator end)
-      : edge_(edge), beg_(beg), end_(end) {}
+      : edge_(edge), beg_(beg - edge->inputs_.begin()),
+        end_(end - edge->inputs_.begin()), size_(end_ - beg_) {}
 
   static EdgeInputsRange Empty(Edge* edge) {
     return EdgeInputsRange(edge, edge->inputs_.begin(), edge->inputs_.begin());
   }
 
-  const_iterator begin() const { return beg_; }
-  const_iterator end() const { return end_; }
+  Node* operator[](size_t i) const { return edge_->inputs_[beg_ + i]; }
+  size_t size() const { return size_; }
 
-  /// The edge whose input range is being viewed.
-  Edge* const edge_;
+  Edge* GetEdge() const { return edge_; }
 
  private:
-  const_iterator beg_;
-  const_iterator end_;
+  /// The edge whose input range is being viewed.
+  Edge* edge_;
+
+  size_t beg_;
+  size_t end_;
+  size_t size_;
 };
 
 /// DependencyScan manages the process of scanning the files in a graph
