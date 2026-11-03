@@ -383,6 +383,15 @@ else:
             cflags += ['-fdiagnostics-color']
     except Exception:
         pass
+    try:
+        proc = subprocess.Popen(
+            [CXX, '-mpopcnt', '-Werror', '-c', '-x', 'c++', '/dev/null',
+             '-o', '/dev/null'],
+            stdout=open(os.devnull, 'wb'), stderr=subprocess.STDOUT)
+        if proc.wait() == 0:
+            cflags += ['-mpopcnt']
+    except Exception:
+        pass
     if platform.is_mingw():
         cflags += ['-D_WIN32_WINNT=0x0601', '-D__USE_MINGW_ANSI_STDIO=1']
     ldflags = ['-L$builddir']

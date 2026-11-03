@@ -23,6 +23,8 @@
 
 #include <stdarg.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -60,11 +62,29 @@ void Error(const char* msg, va_list ap);
 void Info(const char* msg, ...);
 void Info(const char* msg, va_list ap);
 
+// Whether CanonicalizePath() treats paths as Windows-style (with backslashes)
+// or POSIX-style (with forward slashes). This is exposed here so developers
+// can change this to test both implementations regardless of their developer
+// platform.
+#ifdef _WIN32
+#define NINJA_WINDOWS_STYLE_PATHS
+#endif
+
 /// Canonicalize a path like "foo/../bar.h" into just "bar.h".
 /// |slash_bits| has bits set starting from lowest for a backslash that was
 /// normalized to a forward slash. (only used on Windows)
 void CanonicalizePath(std::string* path, uint64_t* slash_bits);
 void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits);
+
+/// Canonicalize a path like "foo/../bar.h" into just "bar.h".
+/// |slash_bits| has bits set starting from lowest for a backslash that was
+/// normalized to a forward slash. This is the general scalar implementation
+/// that CanonicalizePath() falls back to for paths that are not already
+/// canonical. This should not be called directly (unless for testing) and
+/// CanonicalizePath() should be used instead.
+void CanonicalizePathFallback(std::string* path, std::uint64_t* slash_bits);
+void CanonicalizePathFallback(char* path, std::size_t* len,
+                              std::uint64_t* slash_bits);
 
 /// Appends |input| to |*result|, escaping according to the whims of either
 /// Bash, or Win32's CommandLineToArgvW().

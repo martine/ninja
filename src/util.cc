@@ -25,6 +25,7 @@
 #endif
 
 #include <assert.h>
+#include <cstdint>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -62,7 +63,207 @@
 
 #include "edit_distance.h"
 
+#include <cstring>
+
+// Bring in feature test macros
+#if __has_include(<version>)
+#include <version>
+#endif
+
+// std::popcount is used when the standard library provides it (C++20), and
+// the compiler's own popcount otherwise.
+#ifdef __cpp_lib_bitops
+#include <bit>
+#elif defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 using namespace std;
+
+namespace {
+
+bool IsPathSeparator(char c) {
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+  return c == '/' || c == '\\';
+#else
+  return c == '/';
+#endif
+}
+
+// Constants for the highest bit and lowest bit of each 8-byte word.
+const std::uint64_t msb = 0x80'80'80'80'80'80'80'80ull;
+const std::uint64_t lsb = 0x01'01'01'01'01'01'01'01ull;
+
+inline int PopCount64(std::uint64_t w) {
+#ifdef __cpp_lib_bitops
+  return std::popcount(w);
+#elif defined(_MSC_VER) && defined(_M_IX86)
+  // __popcnt64 only exists for 64-bit targets.
+  return static_cast<int>(__popcnt(static_cast<unsigned>(w)) +
+                          __popcnt(static_cast<unsigned>(w >> 32)));
+#elif defined(_MSC_VER)
+  return static_cast<int>(__popcnt64(w));
+#else
+  return __builtin_popcountll(w);
+#endif
+}
+
+/// Load the \a n bytes at \a p, at most 8, into the low bytes of a word and
+/// zero fill the rest.  \a valid_from is the beginning of the buffer,
+/// in which \a p is located, which may be used as an optimization hint.
+inline std::uint64_t LoadWord(const char* valid_from, const char* p,
+                              std::size_t n) {
+  // Keep the length of the copy constant so the compiler can optimize
+  // better.
+  std::uint64_t w;
+  if (n >= 8) {
+    std::memcpy(&w, p, 8);
+  } else if (p + n - valid_from >= 8) {
+    // It's faster to load 8 bytes and shift than to load a dynamic number of
+    // fewer bytes.
+    std::memcpy(&w, p + n - 8, 8);
+    w >>= 8 * (8 - n);
+  } else {
+    w = 0;
+    std::memcpy(&w, p, n);
+  }
+  return w;
+}
+
+/// Return a word with the high bit of each byte set if the corresponding byte
+/// of \a w is equal to \a c, and all other bits set to 0.
+inline std::uint64_t Equal(std::uint64_t w, std::uint8_t c) {
+  const std::uint64_t x = w ^ ~(lsb * c);
+  return ((x & ~msb) + lsb) & x & msb;
+}
+
+/// Return a word with the high bit of each byte set if the corresponding byte
+/// of \a w is either '/' or '.', and all other bits set to 0.
+inline std::uint64_t SeparatorsOrDots(std::uint64_t w) {
+  static_assert(('.' | 1) == '/', "ASCII required");
+  const std::uint64_t x = w ^ ~(lsb * '.');
+  return ((x & (msb - (lsb << 1))) + (lsb << 1)) & x & msb;
+}
+
+/// A fast check for getting canonical form of \a *path.  If it is, return true,
+/// set \a *path to the canonical path (which drops any trailing separator other
+/// than a lone root), and set \a *any_backslash to whether it contains a
+/// backslash.  Otherwise return false and leave both untouched.  This may
+/// return false for a path that is already canonical (e.g. "a/.b"), but never
+/// true for one that is not.
+inline bool TryGetCanonical(StringPiece* path, bool* any_backslash) {
+  const char* const begin = path->begin();
+  const char* const end = path->end();
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+  std::uint64_t backslashes_seen = 0;
+#endif
+
+  // Preserve leading "../" components.
+  const char* p = begin;
+  while (end - p >= 3 && p[0] == '.' && p[1] == '.' && IsPathSeparator(p[2])) {
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+    if (p[2] == '\\')
+      backslashes_seen = 1;
+#endif
+    p += 3;
+  }
+
+  // Every change other than dropping a trailing separator involves two
+  // adjacent separators or dots ("//", "/./", "/../", "./") so we can
+  // detect non-canonical paths by looking for a pair.
+  std::uint64_t carry = p != begin ? 0x80 : 0;
+  std::size_t remaining = end - p;
+  while (remaining) {
+    const std::uint64_t w = LoadWord(begin, p, remaining);
+
+    const std::uint64_t slash_or_dot = SeparatorsOrDots(w);
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+    const std::uint64_t backslashes = Equal(w, '\\');
+    const std::uint64_t slashdot = slash_or_dot | backslashes;
+    backslashes_seen |= backslashes;
+#else
+    const std::uint64_t slashdot = slash_or_dot;
+#endif
+
+    if (slashdot & ((slashdot << 8) | carry))
+      return false;
+    carry = (slashdot >> 63) ? 0x80 : 0;
+    if (remaining < 8)
+      break;
+    p += 8;
+    remaining -= 8;
+  }
+
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+  *any_backslash = backslashes_seen != 0;
+#else
+  *any_backslash = false;
+#endif
+
+  // Dropping a trailing separator is all that is left to do.
+  if (path->size() > 1 && IsPathSeparator(end[-1]))
+    *path = StringPiece(begin, path->size() - 1);
+  return true;
+}
+
+/// The bits of \a src at the positions set in \a mask, packed down in order:
+/// bit k of the result is the bit of \a src under the k-th set bit of \a mask.
+inline std::uint64_t Pext(std::uint64_t src, std::uint64_t mask) {
+  std::uint64_t bits = 0;
+  for (std::uint64_t k = 1; mask; mask &= mask - 1, k <<= 1) {
+    if (src & mask & (0 - mask)) {
+      bits |= k;
+    }
+  }
+  return bits;
+}
+
+/// Rewrite every '\\' in [start, start+len) to '/' and return its slash_bits:
+/// bit i is set iff the i-th separator was originally a backslash.
+/// @pre [start, start+len) does not begin with two separators, so it is never
+/// a UNC path whose "\\\\" prefix would need to be kept.
+std::uint64_t NormalizeSeparators(char* start, std::size_t len) {
+  std::uint64_t bits = 0;
+  unsigned count = 0;
+  char* q = start;
+  const char* stop = start + len;
+
+  // Process 8 bytes at a time.
+  while (stop - q >= 8) {
+    std::uint64_t w;
+    std::memcpy(&w, q, 8);
+    const std::uint64_t backslashes = Equal(w, '\\');
+    const std::uint64_t seps = Equal(w, '/') | backslashes;
+    // Record the slash bits if we have any
+    if (seps) {
+      if (backslashes && count < 64) {
+        bits |= Pext(backslashes, seps) << count;
+      }
+      count += PopCount64(seps);
+    }
+    // Convert all backslashes to forward slashes in the output.
+    w ^= (backslashes >> 7) * static_cast<std::uint64_t>(('/' ^ '\\'));
+    std::memcpy(q, &w, 8);
+    q += 8;
+  }
+
+  // Handle the remaining bytes one-by-one.
+  for (; q != stop; ++q) {
+    const char c = *q;
+    if (c == '\\' || c == '/') {
+      if (c == '\\') {
+        if (count < 64) {
+          bits |= static_cast<std::uint64_t>(1) << count;
+        }
+        *q = '/';
+      }
+      ++count;
+    }
+  }
+  return bits;
+}
+
+}  // namespace
 
 void Fatal(const char* msg, ...) {
   va_list ap;
@@ -130,15 +331,42 @@ void CanonicalizePath(string* path, uint64_t* slash_bits) {
   path->resize(len);
 }
 
-static bool IsPathSeparator(char c) {
-#ifdef _WIN32
-  return c == '/' || c == '\\';
-#else
-  return c == '/';
+void CanonicalizePath(char* path, std::size_t* len, std::uint64_t* slash_bits) {
+#if defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
+    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+  // The SWAR code treats byte i of a loaded word as its bits 8i..8i+7, which
+  // only holds on little-endian targets.
+  CanonicalizePathFallback(path, len, slash_bits);
+  return;
 #endif
+
+  // Most paths are already canonical, or only need a trailing separator
+  // dropped, and a quick scan can confirm this.  Anything else goes to the
+  // scalar implementation.  Backslashes are only ever seen with
+  // NINJA_WINDOWS_STYLE_PATHS, so elsewhere the compiler drops the
+  // NormalizeSeparators() call.
+  StringPiece prefix(path, *len);
+  bool any_backslash;
+  if (TryGetCanonical(&prefix, &any_backslash)) {
+    *len = prefix.size();
+    *slash_bits = any_backslash ? NormalizeSeparators(path, *len) : 0;
+    return;
+  }
+
+  CanonicalizePathFallback(path, len, slash_bits);
 }
 
-void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits) {
+void CanonicalizePathFallback(std::string* path, std::uint64_t* slash_bits) {
+  std::size_t len = path->size();
+  char* str = 0;
+  if (len > 0)
+    str = &(*path)[0];
+  CanonicalizePathFallback(str, &len, slash_bits);
+  path->resize(len);
+}
+
+void CanonicalizePathFallback(char* path, std::size_t* len,
+                              std::uint64_t* slash_bits) {
   // WARNING: this function is performance-critical; please benchmark
   // any changes you make to it.
   if (*len == 0) {
@@ -155,7 +383,7 @@ void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits) {
   // For absolute paths, skip the leading directory separator
   // as this one should never be removed from the result.
   if (IsPathSeparator(*src)) {
-#ifdef _WIN32
+#ifdef NINJA_WINDOWS_STYLE_PATHS
     // Windows network path starts with //
     if (src + 2 <= end && IsPathSeparator(src[1])) {
       src += 2;
@@ -185,7 +413,7 @@ void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits) {
   int component_count = 0;
   char* dst0 = dst;
   for (; src < end; src = src_next) {
-#ifndef _WIN32
+#ifndef NINJA_WINDOWS_STYLE_PATHS
     // Use memchr() for faster lookups thanks to optimized C library
     // implementation. `hyperfine canon_perftest` shows a significant
     // difference (e,g, 484ms vs 437ms).
@@ -288,7 +516,7 @@ void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits) {
   }
 
   *len = dst - start;  // dst points after the trailing char here.
-#ifdef _WIN32
+#ifdef NINJA_WINDOWS_STYLE_PATHS
   uint64_t bits = 0;
   uint64_t bits_mask = 1;
 

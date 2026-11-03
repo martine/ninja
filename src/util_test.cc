@@ -16,6 +16,8 @@
 
 #include "test.h"
 
+#include <random>
+
 using namespace std;
 
 namespace {
@@ -30,6 +32,29 @@ void CanonicalizePath(string* path) {
 TEST(CanonicalizePath, PathSamples) {
   string path;
 
+#ifdef NINJA_WINDOWS_STYLE_PATHS
+  path = ".\\foo.h";
+  CanonicalizePath(&path);
+  EXPECT_EQ("foo.h", path);
+#endif
+
+  path = "../";
+  CanonicalizePath(&path);
+  EXPECT_EQ("..", path);
+
+  path = "../..";
+  CanonicalizePath(&path);
+  EXPECT_EQ("../..", path);
+
+  path = "a/foo/../bar.h";
+  CanonicalizePath(&path);
+  EXPECT_EQ("a/bar.h", path);
+
+  path = "./x/../bar.h";
+  CanonicalizePath(&path);
+  EXPECT_EQ("bar.h", path);
+
+  path = "";
   CanonicalizePath(&path);
   EXPECT_EQ("", path);
 
@@ -69,6 +94,15 @@ TEST(CanonicalizePath, PathSamples) {
   CanonicalizePath(&path);
   EXPECT_EQ("foo", path);
 
+  path = "aa/b/c/.";
+  CanonicalizePath(&path);
+  EXPECT_EQ("aa/b/c", path);
+
+  path = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/b/c/.";
+  CanonicalizePath(&path);
+  EXPECT_EQ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/b/c",
+            path);
+
   path = "foo/bar/..";
   CanonicalizePath(&path);
   EXPECT_EQ("foo", path);
@@ -83,7 +117,7 @@ TEST(CanonicalizePath, PathSamples) {
 
   path = "//foo";
   CanonicalizePath(&path);
-#ifdef _WIN32
+#ifdef NINJA_WINDOWS_STYLE_PATHS
   EXPECT_EQ("//foo", path);
 #else
   EXPECT_EQ("/foo", path);
@@ -156,9 +190,13 @@ TEST(CanonicalizePath, PathSamples) {
   path = "foo/.._bar";
   CanonicalizePath(&path);
   EXPECT_EQ("foo/.._bar", path);
+
+  path = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x/y/z/../../../c.h";
+  CanonicalizePath(&path);
+  EXPECT_EQ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/c.h", path);
 }
 
-#ifdef _WIN32
+#ifdef NINJA_WINDOWS_STYLE_PATHS
 TEST(CanonicalizePath, PathSamplesWindows) {
   string path;
 
@@ -395,7 +433,7 @@ TEST(CanonicalizePath, TooManyComponents) {
   CanonicalizePath(&path, &slash_bits);
   EXPECT_EQ(slash_bits, 0xffffffffffffffff);
 }
-#else   // !_WIN32
+#else   // !NINJA_WINDOWS_STYLE_PATHS
 TEST(CanonicalizePath, TooManyComponents) {
   string path;
   uint64_t slash_bits;
@@ -420,7 +458,80 @@ TEST(CanonicalizePath, TooManyComponents) {
   CanonicalizePath(&path, &slash_bits);
   EXPECT_EQ(slash_bits, 0x0);
 }
-#endif  // !_WIN32
+#endif  // !NINJA_WINDOWS_STYLE_PATHS
+
+// Compare CanonicalizePath() against CanonicalizePathFallback() on random
+// paths, at lengths around the 8-byte word boundaries of the fast check.
+// '\\' is an ordinary byte on POSIX, but stays in the alphabet there to check
+// that no Windows backslash handling leaks in.
+TEST(CanonicalizePath, DifferentialAgainstReference) {
+  // '?' stands for any byte at all, so we also check that no byte (e.g. one
+  // with the high bit set) is mistaken for a separator or dot.
+  const char alphabet[] = { 'a', 'b', '/', '.', '\\', '?' };
+  // Default seeded, so every run and every platform generates the same paths.
+  std::mt19937_64 rng;
+  const int lengths[] = { 1,   2,   3,   8,   31,  55,  60,  61,  62,  63,
+                          64,  65,  66,  67,  70,  80,  100, 126, 127, 128,
+                          129, 130, 190, 191, 192, 193, 200, 255, 256, 257 };
+  for (std::size_t li = 0; li < sizeof(lengths) / sizeof(lengths[0]); ++li) {
+    const int len = lengths[li];
+    for (int iter = 0; iter < 2000; ++iter) {
+      std::string in;
+      in.reserve(len);
+      for (int k = 0; k < len; ++k) {
+        const char c = alphabet[rng() % sizeof(alphabet)];
+        in += c == '?' ? static_cast<char>(rng() % 256) : c;
+      }
+      std::string ref = in, swar = in;
+      std::uint64_t ref_bits = 0, swar_bits = 0;
+      CanonicalizePathFallback(&ref, &ref_bits);
+      CanonicalizePath(&swar, &swar_bits);
+      ASSERT_EQ(ref, swar) << "input=[" << in << "]";
+      ASSERT_EQ(ref_bits, swar_bits)
+          << "input=[" << in << "] out=[" << ref << "]";
+    }
+  }
+}
+
+// Directory names longer than a word, cancelled by later ".." components,
+// with the ".." at every alignment within the 8-byte words of the fast check.
+TEST(CanonicalizePath, BoundarySpanningParent) {
+  std::string path, expected;
+  std::uint64_t slash_bits;
+
+  for (int i = 1; i < 140; ++i) {
+    path.assign(i, 'a');
+    expected = path + "/c";
+    path += "/bbbbbbbbbbbbbbbbbbbb/../c";
+    CanonicalizePath(&path, &slash_bits);
+    EXPECT_EQ(expected, path) << "i=" << i;
+    EXPECT_EQ(0u, slash_bits);
+  }
+
+  for (int i = 1; i < 140; ++i) {
+    // A ".." cascade that pops components several words earlier.
+    path.assign(i, 'a');
+    expected = path;
+    path += "/bbbbbbbbbb/cccccccccc/dddddddddd/../../..";
+    CanonicalizePath(&path, &slash_bits);
+    EXPECT_EQ(expected, path) << "i=" << i;
+    EXPECT_EQ(0u, slash_bits);
+  }
+}
+
+// A ".." that empties the output, at every alignment, followed by a further
+// "dir/.." that must still be resolved.
+TEST(CanonicalizePath, PopToEmptyAtBoundary) {
+  std::string path;
+  std::uint64_t slash_bits;
+  for (int i = 1; i < 140; ++i) {
+    path.assign(i, 'a');
+    path += "/../x/../y";
+    CanonicalizePath(&path, &slash_bits);
+    EXPECT_EQ("y", path) << "i=" << i;
+    EXPECT_EQ(0u, slash_bits);
+  }
+}
 
 TEST(CanonicalizePath, UpDir) {
   string path, err;

@@ -41,6 +41,14 @@ else()
     set(CMAKE_COLOR_DIAGNOSTICS ON)
   endif()
 
+  # -Werror because Clang only warns that -mpopcnt is unused on non-x86.
+  set(CMAKE_REQUIRED_FLAGS -Werror)
+  check_cxx_compiler_flag(-mpopcnt flag_popcnt)
+  unset(CMAKE_REQUIRED_FLAGS)
+  if(flag_popcnt)
+    add_compile_options(-mpopcnt)
+  endif()
+
   if(NOT NINJA_FORCE_PSELECT)
     # Check whether ppoll() is usable on the target platform.
     # Set -DUSE_PPOLL=1 if this is the case.
