@@ -736,6 +736,75 @@ TEST_F(DepsLogTest, MalformedDepsLog) {
               disk.ReadFile(kBadLogFile, &recovered_contents, &err));
     EXPECT_EQ(original_contents, recovered_contents);
   }
+
+  // A deps record too short to hold out_id and the 64-bit mtime must be
+  // discarded, preserving earlier deps. Its deps_count used to go negative
+  // and new Node*[] attempted a huge allocation while loading.
+  const uint32_t kUndersizedDepsRecord[] = {0x80000004u, 0};
+  bad_contents = original_contents;
+  bad_contents.append(reinterpret_cast<const char*>(kUndersizedDepsRecord),
+                      sizeof(kUndersizedDepsRecord));
+  ASSERT_TRUE(write_bad_log_file(bad_contents)) << strerror(errno);
+  {
+    State state;
+    DepsLog log;
+    err.clear();
+    ASSERT_EQ(LOAD_SUCCESS, log.Load(kBadLogFile, &state, &err));
+    ASSERT_EQ("premature end of file; recovering", err);
+
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    ASSERT_TRUE(deps);
+    ASSERT_EQ(1, deps->mtime);
+    ASSERT_EQ(2, deps->node_count);
+    EXPECT_EQ("foo.hh", deps->nodes[0]->path());
+    EXPECT_EQ("bar.hpp", deps->nodes[1]->path());
+
+    std::string recovered_contents;
+    ASSERT_EQ(FileReader::Okay,
+              disk.ReadFile(kBadLogFile, &recovered_contents, &err));
+    EXPECT_EQ(original_contents, recovered_contents);
+  }
+
+  // A path record whose content is only zero bytes must not walk path_size
+  // below the start of the record buffer while stripping padding. It used to
+  // read before buf (and could drive path_size negative into a huge
+  // StringPiece); loading it under -fsanitize=address tripped a
+  // stack-buffer-overflow.
+  // clang-format off
+  static const uint8_t kAllZeroPathRecord[] = {
+    // size field == 0x00000005 (one path byte + four checksum bytes)
+#if defined(_WIN32) || (defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+    0x05, 0x00, 0x00, 0x00,
+#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    0x00, 0x00, 0x00, 0x05,
+#else
+#  error "Unknown endianness."
+#endif
+    // single zero "path" byte, then checksum = ~0
+    0x00,
+    0xff, 0xff, 0xff, 0xff,
+  };
+  // clang-format on
+  bad_contents = original_contents;
+  bad_contents.append(reinterpret_cast<const char*>(kAllZeroPathRecord),
+                      sizeof(kAllZeroPathRecord));
+  ASSERT_TRUE(write_bad_log_file(bad_contents)) << strerror(errno);
+  {
+    State state;
+    DepsLog log;
+    err.clear();
+    ASSERT_EQ(LOAD_SUCCESS, log.Load(kBadLogFile, &state, &err));
+    ASSERT_EQ("premature end of file; recovering", err);
+
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    ASSERT_TRUE(deps);
+    ASSERT_EQ(2, deps->node_count);
+
+    std::string recovered_contents;
+    ASSERT_EQ(FileReader::Okay,
+              disk.ReadFile(kBadLogFile, &recovered_contents, &err));
+    EXPECT_EQ(original_contents, recovered_contents);
+  }
 }
 
 // Verify that recovery correctly removes a structurally-valid but

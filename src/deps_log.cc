@@ -209,6 +209,14 @@ LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
         read_failed = true;
         break;
       }
+      // A deps record stores out_id and a 64-bit mtime (three 4-byte words)
+      // ahead of the dependency ids, so the smallest valid one is 12 bytes.
+      // A shorter record (truncated write or crafted file) made deps_count
+      // below go negative, which new Node*[] turned into a huge allocation.
+      if (size < 4 * 3) {
+        read_failed = true;
+        break;
+      }
       int* deps_data = reinterpret_cast<int*>(buf);
       int out_id = deps_data[0];
       // A truncated or concurrent write can leave a deps record whose
@@ -248,10 +256,12 @@ LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
         read_failed = true;
         break;
       }
-      // There can be up to 3 bytes of padding.
-      if (buf[path_size - 1] == '\0') --path_size;
-      if (buf[path_size - 1] == '\0') --path_size;
-      if (buf[path_size - 1] == '\0') --path_size;
+      // There can be up to 3 bytes of padding. Keep at least one byte so an
+      // all-zero (truncated or crafted) record cannot walk path_size below the
+      // start of buf and read out of bounds.
+      if (path_size > 1 && buf[path_size - 1] == '\0') --path_size;
+      if (path_size > 1 && buf[path_size - 1] == '\0') --path_size;
+      if (path_size > 1 && buf[path_size - 1] == '\0') --path_size;
       StringPiece subpath(buf, path_size);
       // It is not necessary to pass in a correct slash_bits here. It will
       // either be a Node that's in the manifest (in which case it will already
