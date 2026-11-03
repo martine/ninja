@@ -48,6 +48,20 @@ TEST(ElideMiddle, ElideInTheMiddle) {
   EXPECT_EQ("01234567890123456789", ElideMiddle(input, 20));
 }
 
+TEST(ElideMiddle, Utf8EmojiWidth) {
+  const char* kThread = "\xF0\x9F\xA7\xB5";  // 🧵
+  const char* kStopwatch = "\xE2\x8F\xB1\xEF\xB8\x8F";  // ⏱️ (with VS16)
+  std::string input = std::string("A") + kThread + "B";
+  EXPECT_EQ(input, ElideMiddle(input, 4));
+  EXPECT_EQ("...", ElideMiddle(input, 3));
+
+  input = std::string("A") + kStopwatch + "B";
+  EXPECT_EQ(input, ElideMiddle(input, 4));
+
+  input = std::string("0") + kThread + "1234567";
+  EXPECT_EQ(std::string("0") + kThread + "...567", ElideMiddle(input, 9));
+}
+
 // A few ANSI escape sequences. These macros make the following
 // test easier to read and understand.
 #define MAGENTA "\x1B[0;35m"
@@ -93,6 +107,12 @@ TEST(ElideMiddle, ElideAnsiEscapeCodes) {
   EXPECT_EQ("ab..." RED RESET "BC", ElideMiddle(input, 7));
   EXPECT_EQ("ab..." RED "A" RESET "BC", ElideMiddle(input, 8));
   EXPECT_EQ("abcdef" RED "A" RESET "BC", ElideMiddle(input, 9));
+}
+
+TEST(ElideMiddle, Utf8EmojiWithAnsi) {
+  const char* kThread = "\xF0\x9F\xA7\xB5";  // 🧵
+  std::string input = std::string("A") + RED + kThread + RESET + "B";
+  EXPECT_EQ(input, ElideMiddle(input, 4));
 }
 
 #undef RESET
