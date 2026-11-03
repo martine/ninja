@@ -455,7 +455,7 @@ class JobserverTest(unittest.TestCase):
             # First, run the full tasks with with {task_count} tokens, this should allow all
             # tasks to run in parallel.
             ret = b.ninja_run(
-                ninja_args=["--jobserver-pool", "all"],
+                ninja_args=["--jobserver-pool", f"-j{task_count}", "all"],
             )
             max_overlaps = compute_max_overlapped_spans(b.path, task_count)
             self.assertEqual(max_overlaps, task_count)
