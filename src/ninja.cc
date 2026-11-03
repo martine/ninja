@@ -79,6 +79,9 @@ struct Options {
   /// Directory to change into before running.
   const char* working_dir;
 
+  /// Command used to run Ninja (only used by the browse tool).
+  std::string ninja_command;
+
   /// Tool to run rather than building.
   const Tool* tool;
 
@@ -137,12 +140,8 @@ struct JobserverState {
 /// The Ninja main() loads up a series of data structures; various tools need
 /// to poke into these, so store them as fields on an object.
 struct NinjaMain : public BuildLogUser {
-  NinjaMain(const char* ninja_command, const BuildConfig& config) :
-      ninja_command_(ninja_command), config_(config),
-      start_time_millis_(GetTimeMillis()) {}
-
-  /// Command line used to run Ninja.
-  const char* ninja_command_;
+  explicit NinjaMain(const BuildConfig& config) :
+      config_(config), start_time_millis_(GetTimeMillis()) {}
 
   /// Build configuration set from flags (e.g. parallelism).
   const BuildConfig& config_;
@@ -529,7 +528,8 @@ int NinjaMain::ToolQuery(const Options* options, int argc, char* argv[]) {
 
 #if defined(NINJA_HAVE_BROWSE)
 int NinjaMain::ToolBrowse(const Options* options, int argc, char* argv[]) {
-  RunBrowsePython(&state_, ninja_command_, options->input_file, argc, argv);
+  RunBrowsePython(&state_, options->ninja_command.c_str(), options->input_file,
+                  argc, argv);
   // If we get here, the browse failed.
   return 1;
 }
@@ -1958,13 +1958,23 @@ NORETURN void real_main(int argc, char** argv) {
   options.input_file = "build.ninja";
 
   setvbuf(stdout, NULL, _IOLBF, BUFSIZ);
-  const char* ninja_command = argv[0];
+  options.ninja_command = argv[0];
 
   int exit_code = ReadFlags(&argc, &argv, &options, &config);
   if (exit_code >= 0)
     exit(exit_code);
 
   Status* status = Status::factory(config);
+
+#ifndef _WIN32
+  // Make a relative ninja path (e.g. "build/ninja") absolute before -C changes
+  // the working directory, so the browse tool can still re-invoke ninja. Bare
+  // names are left alone so they are still looked up in PATH.
+  if (options.working_dir && options.ninja_command[0] != '/' &&
+      options.ninja_command.find('/') != std::string::npos) {
+    options.ninja_command = GetWorkingDirectory() + "/" + options.ninja_command;
+  }
+#endif
 
   if (options.working_dir) {
     // The formatting of this string, complete with funny quotes, is
@@ -1982,14 +1992,14 @@ NORETURN void real_main(int argc, char** argv) {
   if (options.tool && options.tool->when == Tool::RUN_AFTER_FLAGS) {
     // None of the RUN_AFTER_FLAGS actually use a NinjaMain, but it's needed
     // by other tools.
-    NinjaMain ninja(ninja_command, config);
+    NinjaMain ninja(config);
     exit((ninja.*options.tool->func)(&options, argc, argv));
   }
 
   // Limit number of rebuilds, to prevent infinite loops.
   const int kCycleLimit = 100;
   for (int cycle = 1; cycle <= kCycleLimit; ++cycle) {
-    NinjaMain ninja(ninja_command, config);
+    NinjaMain ninja(config);
 
     ManifestParserOptions parser_opts;
     if (options.phony_cycle_should_err) {
