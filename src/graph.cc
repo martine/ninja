@@ -696,7 +696,11 @@ std::string EdgeEnv::LookupVariable(StringPiece var) {
   // In practice, variables defined on rules never use another rule variable.
   // For performance, only start checking for cycles after the first lookup.
   recursive_ = true;
-  std::string result = edge_->env_->LookupWithFallback(var, eval, this);
+  // Without local bindings, env_ is the enclosing file scope, which must
+  // not take precedence over the rule.
+  std::string result = !edge_->has_local_bindings_ && eval
+                           ? eval->Evaluate(this)
+                           : edge_->env_->LookupWithFallback(var, eval, this);
   if (record_varname)
     lookups_.pop_back();
   return result;

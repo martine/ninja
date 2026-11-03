@@ -331,6 +331,7 @@ bool ManifestParser::ParseEdge(string* err) {
 
   Edge* edge = state_->AddEdge(rule);
   edge->env_ = env;
+  edge->has_local_bindings_ = env != env_;
 
   string pool_name = edge->GetBinding("pool");
   if (!pool_name.empty()) {
