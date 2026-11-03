@@ -65,15 +65,15 @@ struct MissingDependencyScannerTest : public testing::Test {
     compile_rule_.AddBinding("deps", deps_type);
     generator_rule_.AddBinding("deps", deps_type);
     Edge* header_edge = state_.AddEdge(&generator_rule_);
-    state_.AddOut(header_edge, "generated_header", 0, nullptr);
+    state_.AddOut(header_edge, state_.GetNode("generated_header", 0), nullptr);
     Edge* compile_edge = state_.AddEdge(&compile_rule_);
-    state_.AddOut(compile_edge, "compiled_object", 0, nullptr);
+    state_.AddOut(compile_edge, state_.GetNode("compiled_object", 0), nullptr);
   }
 
   void CreateGraphDependencyBetween(const char* from, const char* to) {
     Node* from_node = state_.LookupNode(from);
     Edge* from_edge = from_node->in_edge();
-    state_.AddIn(from_edge, to, 0);
+    state_.AddIn(from_edge, state_.GetNode(to, 0));
   }
 
   void AssertMissingDependencyBetween(const char* flaky, const char* generated,
@@ -131,7 +131,7 @@ TEST_F(MissingDependencyScannerTest, MissingDepFixedIndirect) {
   CreateInitialState();
   // Adding an indirect dependency also fixes the issue
   Edge* intermediate_edge = state_.AddEdge(&generator_rule_);
-  state_.AddOut(intermediate_edge, "intermediate", 0, nullptr);
+  state_.AddOut(intermediate_edge, state_.GetNode("intermediate", 0), nullptr);
   CreateGraphDependencyBetween("compiled_object", "intermediate");
   CreateGraphDependencyBetween("intermediate", "generated_header");
   RecordDepsLogDep("compiled_object", "generated_header");

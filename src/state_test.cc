@@ -34,9 +34,9 @@ TEST(State, Basic) {
   state.bindings_.AddRule(std::unique_ptr<Rule>(rule));
 
   Edge* edge = state.AddEdge(rule);
-  state.AddIn(edge, "in1", 0);
-  state.AddIn(edge, "in2", 0);
-  state.AddOut(edge, "out", 0, nullptr);
+  state.AddIn(edge, state.GetNode("in1", 0));
+  state.AddIn(edge, state.GetNode("in2", 0));
+  state.AddOut(edge, state.GetNode("out", 0), nullptr);
 
   EXPECT_EQ("cat in1 in2 > out", edge->EvaluateCommand());
 

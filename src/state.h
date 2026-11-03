@@ -103,16 +103,18 @@ struct State {
 
   Edge* AddEdge(const Rule* rule);
 
+  Node* GetNode(const char* path, uint64_t slash_bits);
   Node* GetNode(StringPiece path, uint64_t slash_bits);
+  Node* GetNode(std::string&& path, uint64_t slash_bits);
   Node* LookupNode(StringPiece path) const;
   Node* SpellcheckNode(const std::string& path);
 
   /// Add input / output / validation nodes to a given edge. This also
   /// ensures that the generated_by_dep_loader() flag for all these nodes
   /// is set to false, to indicate that they come from the input manifest.
-  void AddIn(Edge* edge, StringPiece path, uint64_t slash_bits);
-  bool AddOut(Edge* edge, StringPiece path, uint64_t slash_bits, std::string* err);
-  void AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits);
+  void AddIn(Edge* edge, Node *node);
+  bool AddOut(Edge* edge, Node *node, std::string* err);
+  void AddValidation(Edge* edge, Node *node);
   bool AddDefault(StringPiece path, std::string* error);
 
   /// Reset state.  Keeps all nodes and edges, but restores them to the

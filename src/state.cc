@@ -92,12 +92,39 @@ Edge* State::AddEdge(const Rule* rule) {
   return edge;
 }
 
+Node* State::GetNode(const char* path, uint64_t slash_bits) {
+  return GetNode(StringPiece(path), slash_bits);
+}
+
 Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
-  Node* node = LookupNode(path);
-  if (node)
-    return node;
-  node = new Node(path.AsString(), slash_bits);
-  paths_[node->path()] = node;
+  const std::pair<Paths::iterator, bool> result = paths_.try_emplace(path, nullptr);
+  Node*& node = result.first->second;
+  const bool is_new = result.second;
+  if (is_new) {
+    assert(node == nullptr);
+    // If `try_emplace` added a new node then we need to actually allocate a `Node`
+    // element and replace the existing value in the map.
+    node = new Node(path.AsString(), slash_bits);
+
+    // Additionally, as the key is a StringPiece, it needs to refer to a string
+    // that has a longer life than the `path` parameter. As we take a deep copy
+    // of `path` inside `Node` we can point to this string instead.  Note this does
+    // not change the hash result nor the equality behavior of the StringPiece.
+    result.first->first = node->path();
+  }
+  return node;
+}
+
+Node* State::GetNode(std::string&& path, uint64_t slash_bits) {
+  // See comments on the `GetNode` overload above for more information.
+  const std::pair<Paths::iterator, bool> result = paths_.try_emplace(path, nullptr);
+  Node*& node = result.first->second;
+  const bool is_new = result.second;
+  if (is_new) {
+    assert(node == nullptr);
+    node = new Node(std::move(path), slash_bits);
+    result.first->first = node->path();
+  }
   return node;
 }
 
@@ -125,21 +152,18 @@ Node* State::SpellcheckNode(const string& path) {
   return result;
 }
 
-void State::AddIn(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
+void State::AddIn(Edge* edge, Node* node) {
   node->set_generated_by_dep_loader(false);
   edge->inputs_.push_back(node);
   node->AddOutEdge(edge);
 }
 
-bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
-                   std::string* err) {
-  Node* node = GetNode(path, slash_bits);
+bool State::AddOut(Edge* edge, Node* node, std::string* err) {
   if (Edge* other = node->in_edge()) {
     if (other == edge) {
-      *err = path.AsString() + " is defined as an output multiple times";
+      *err = node->path() + " is defined as an output multiple times";
     } else {
-      *err = "multiple rules generate " + path.AsString();
+      *err = "multiple rules generate " + node->path();
     }
     return false;
   }
@@ -149,8 +173,7 @@ bool State::AddOut(Edge* edge, StringPiece path, uint64_t slash_bits,
   return true;
 }
 
-void State::AddValidation(Edge* edge, StringPiece path, uint64_t slash_bits) {
-  Node* node = GetNode(path, slash_bits);
+void State::AddValidation(Edge* edge, Node* node) {
   edge->validations_.push_back(node);
   node->AddValidationOutEdge(edge);
   node->set_generated_by_dep_loader(false);
