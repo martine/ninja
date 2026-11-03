@@ -23,6 +23,7 @@ pre {
     border: solid 1px #ddd;
     min-width: 0;
     font-size: 90%;
+    overflow-x: auto;
 }
 @media (prefers-color-scheme: dark) {
   pre {

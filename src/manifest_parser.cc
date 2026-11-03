@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <algorithm>
 #include <charconv>
 #include <memory>
 #include <vector>
@@ -28,6 +29,34 @@
 #include "version.h"
 
 using namespace std;
+
+namespace {
+
+/// Like CanonicalizePath(), but keeps a trailing path separator, which marks
+/// the input as a directory (see Node::is_directory_input()).
+void CanonicalizeInputPath(std::string* path, uint64_t* slash_bits) {
+  const char last = path->back();
+#ifdef _WIN32
+  const bool is_directory = last == '/' || last == '\\';
+#else
+  const bool is_directory = last == '/';
+#endif
+  CanonicalizePath(path, slash_bits);
+  if (!is_directory || path->back() == '/') {
+    return;
+  }
+#ifdef _WIN32
+  if (last == '\\') {
+    const size_t slash_count = std::count(path->begin(), path->end(), '/');
+    if (slash_count < 64) {
+      *slash_bits |= uint64_t(1) << slash_count;
+    }
+  }
+#endif
+  path->push_back('/');
+}
+
+}  // namespace
 
 ManifestParser::ManifestParser(State* state, FileReader* file_reader,
                                ManifestParserOptions options)
@@ -368,7 +397,7 @@ bool ManifestParser::ParseEdge(string* err) {
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
-    CanonicalizePath(&path, &slash_bits);
+    CanonicalizeInputPath(&path, &slash_bits);
     state_->AddIn(edge, path, slash_bits);
   }
   edge->implicit_deps_ = implicit;

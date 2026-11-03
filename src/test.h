@@ -54,6 +54,9 @@ struct VirtualFileSystem : public DiskInterface {
   /// "Create" a file with contents.
   void Create(const std::string& path, const std::string& contents);
 
+  /// "Create" a directory, or update its mtime if it exists already.
+  void CreateDir(const std::string& path);
+
   /// Tick "time" forwards; subsequent file operations will be newer than
   /// previous ones.
   int Tick() {
@@ -62,6 +65,8 @@ struct VirtualFileSystem : public DiskInterface {
 
   // DiskInterface
   TimeStamp Stat(const std::string& path, std::string* err) const override;
+  TimeStamp StatDirectory(const std::string& path,
+                          std::string* err) const override;
   bool WriteFile(const std::string& path, const std::string& contents,
                  bool /*crlf_on_windows*/) override;
   bool MakeDir(const std::string& path) override;
@@ -74,6 +79,7 @@ struct VirtualFileSystem : public DiskInterface {
     int mtime;
     std::string stat_error;  // If mtime is -1.
     std::string contents;
+    bool directory = false;
   };
 
   std::vector<std::string> directories_made_;

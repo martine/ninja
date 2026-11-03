@@ -157,6 +157,19 @@ TEST_F(DiskInterfaceTest, StatExistingDir) {
             disk_.Stat("subdir/subsubdir/.", &err));
 }
 
+TEST_F(DiskInterfaceTest, StatDirectory) {
+  std::string err;
+  ASSERT_TRUE(disk_.MakeDir("subdir"));
+  ASSERT_TRUE(Touch("file"));
+  EXPECT_EQ(disk_.Stat("subdir", &err), disk_.StatDirectory("subdir", &err));
+  EXPECT_GT(disk_.StatDirectory("subdir", &err), 1);
+  EXPECT_GT(disk_.StatDirectory(".", &err), 1);
+  EXPECT_EQ(0, disk_.StatDirectory("file", &err));
+  EXPECT_EQ(0, disk_.StatDirectory("file/sub", &err));
+  EXPECT_EQ(0, disk_.StatDirectory("nonexistent", &err));
+  EXPECT_EQ("", err);
+}
+
 #ifdef _WIN32
 TEST_F(DiskInterfaceTest, StatCache) {
   string err;
@@ -284,6 +297,11 @@ struct StatTest : public StateTestWithBuiltinRules,
 
   // DiskInterface implementation.
   TimeStamp Stat(const string& path, string* err) const override;
+  TimeStamp StatDirectory(const std::string& path,
+                          std::string* err) const override {
+    assert(false);
+    return 0;
+  }
   bool WriteFile(const string& path, const string& contents,
                  bool /*crlf_on_windows*/) override {
     assert(false);

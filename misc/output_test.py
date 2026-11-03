@@ -722,6 +722,44 @@ build foo: sleep
                     proc.wait()
                     self.assertEqual(proc.returncode, 130, msg=f"For signal {signum}")
 
+    def test_directory_input(self) -> None:
+        """A missing directory input is not an error, but adding it, changing its
+        entries or removing it makes its dependents dirty."""
+        plan = r"""rule touch
+  command = touch $out
+  description = touch $out
+
+build out: touch src/optional/
+"""
+        with BuildDir(plan) as b:
+            optional = os.path.join(b.path, 'src', 'optional')
+            os.mkdir(os.path.join(b.path, 'src'))
+
+            def assert_builds(expected: bool) -> None:
+                output = b.run('', pipe=True)
+                if expected:
+                    self.assertEqual(output, '[1/1] touch out\n')
+                else:
+                    self.assertEqual(output, 'ninja: no work to do.\n')
+                # Make sure the next file system change gets a newer mtime.
+                time.sleep(0.1)
+
+            assert_builds(True)
+            assert_builds(False)
+            # Changing the parent of the missing directory doesn't matter.
+            open(os.path.join(b.path, 'src', 'sibling'), 'w').close()
+            assert_builds(False)
+            os.mkdir(optional)
+            assert_builds(True)
+            assert_builds(False)
+            open(os.path.join(optional, 'a.cpp'), 'w').close()
+            assert_builds(True)
+            assert_builds(False)
+            os.remove(os.path.join(optional, 'a.cpp'))
+            os.rmdir(optional)
+            assert_builds(True)
+            assert_builds(False)
+
 
 if __name__ == '__main__':
     unittest.main()

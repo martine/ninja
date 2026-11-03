@@ -110,6 +110,14 @@ struct Node {
     generated_by_dep_loader_ = value;
   }
 
+  /// True if this node is a directory input, i.e. its path was written with a
+  /// trailing slash in the manifest. Such a node is never dirty and a missing
+  /// directory is not an error. A path that isn't a directory is treated like
+  /// a missing one. See Node::Stat().
+  bool is_directory_input() const {
+    return !path_.empty() && path_.back() == '/';
+  }
+
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
 
@@ -125,6 +133,10 @@ struct Node {
   void Dump(const char* prefix="") const;
 
 private:
+  /// Stat() for directory inputs. A missing directory isn't an error, and a
+  /// path that isn't a directory is treated like a missing one.
+  bool StatDirectoryInput(DiskInterface* disk_interface, std::string* err);
+
   std::string path_;
 
   /// Set bits starting from lowest for backslashes that were normalized to

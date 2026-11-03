@@ -1220,6 +1220,88 @@ express the implicit dependency.)
 File paths are compared as is, which means that an absolute path and a
 relative path, pointing to the same file, are considered different by Ninja.
 
+[[dir_inputs]]
+Directory inputs
+~~~~~~~~~~~~~~~~
+
+_Available since Ninja 1.14._
+
+Generators often expand globs. For example, a generator script `configure.py`
+might create a test executable for every `*.c` file in a directory called
+`test`. With the files `test/a.c` and `test/b.c`, it writes the following
+`build.ninja`:
+
+----
+rule configure
+  command = ./configure.py
+  generator = 1
+
+rule cc
+  command = cc $in -o $out
+
+build build.ninja: configure configure.py test
+
+build a: cc test/a.c
+build b: cc test/b.c
+----
+
+The directory `test` is an input of `build.ninja`, so Ninja re-runs
+`configure.py` when a file is added to or removed from it: most file systems
+update the modification time of a directory whenever entries are added to,
+removed from or renamed in it (but not when the contents of a file inside it
+change).
+
+This fails when the directory itself is added or removed, though:
+
+* If `test` is removed, e.g. by checking out an older commit in which it
+  didn't exist yet, Ninja refuses to re-run the generator, even if
+  `configure.py` changed as well:
++
+----
+ninja: error: rebuilding 'build.ninja': 'test', needed by 'build.ninja', missing and no known rule to make it
+----
++
+The generator then has to be re-run manually.
+
+* If `test` doesn't exist yet, `configure.py` can't list it as an input
+  without running into the error above, so creating it later doesn't re-run
+  the generator.
+
+An input path with a trailing path separator is a _directory input_, which
+handles these cases. With
+
+----
+build build.ninja: configure configure.py test/
+----
+
+Ninja re-runs `configure.py` when a file is added to or removed from `test`,
+but also when `test` itself is created or removed.
+
+Like for other directory paths, Ninja uses the modification time of the
+directory itself for a directory input. Unlike other inputs, a directory input
+never fails the build, even if the directory doesn't exist. A path that exists
+but isn't a directory (e.g. a regular file) is treated like a missing
+directory. Instead of failing, Ninja records in its build log which directory
+inputs were missing when the command of an edge last ran. This way:
+
+* creating the directory makes the dependent edges dirty, even if it has an
+  older modification time than their outputs (e.g. because it was moved there),
+* removing the directory makes them dirty,
+* a directory that doesn't exist and never did doesn't make them dirty, no
+  matter what happens to its parent directory.
+
+This applies to edges of `generator` rules too, although they are not rebuilt
+when only their command line changes.
+
+Note that a directory input must not be a directory that the build itself
+writes to, as this would make the dependent edges dirty again after each run.
+
+Without the trailing separator (e.g. `test`), a path is a regular input, which
+may point to a directory too, but which fails the build if it's missing. As
+the trailing separator is part of the path, `test/` and `test` are different
+nodes. Directory inputs can only be specified on build lines of the manifest;
+paths in depfiles and dyndep files are always regular inputs.
+
 [[validations]]
 Validations
 ~~~~~~~~~~~
