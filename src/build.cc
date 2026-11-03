@@ -92,13 +92,17 @@ void Plan::Reset() {
   want_.clear();
 }
 
-bool Plan::AddTarget(const Node* target, string* err) {
+bool Plan::AddTarget(const Node* target, uint16_t prio, string* err) {
   targets_.push_back(target);
-  return AddSubTarget(target, NULL, err, NULL);
+  return AddSubTarget(target, NULL, err, NULL, prio);
+}
+
+bool Plan::AddTarget(const Node* target, string* err) {
+  return AddTarget(target, Edge::kpriority_group_unassigned, err);
 }
 
 bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
-                        set<Edge*>* dyndep_walk) {
+                        set<Edge*>* dyndep_walk, uint16_t prio) {
   Edge* edge = node->in_edge();
   if (!edge) {
      // Leaf node, this can be either a regular input from the manifest
@@ -115,6 +119,10 @@ bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
      }
      return false;
   }
+
+  if (edge->priority_group() == Edge::kpriority_group_unassigned &&
+      prio != Edge::kpriority_group_unassigned)
+    edge->set_priority_group(prio);
 
   if (edge->outputs_ready())
     return false;  // Don't need to do anything.
@@ -143,7 +151,7 @@ bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
 
   for (vector<Node*>::iterator i = edge->inputs_.begin();
        i != edge->inputs_.end(); ++i) {
-    if (!AddSubTarget(*i, node, err, dyndep_walk) && !err->empty())
+    if (!AddSubTarget(*i, node, err, dyndep_walk, prio) && !err->empty())
       return false;
   }
 
@@ -422,8 +430,7 @@ bool Plan::RefreshDyndepDependents(DependencyScan* scan,
     for (std::vector<Node*>::iterator v = validation_nodes.begin();
          v != validation_nodes.end(); ++v) {
       if (Edge* in_edge = (*v)->in_edge()) {
-        if (!in_edge->outputs_ready() &&
-            !AddTarget(*v, err)) {
+        if (!in_edge->outputs_ready() && !AddTarget(*v, err)) {
           return false;
         }
       }
@@ -664,25 +671,33 @@ void Builder::Cleanup() {
     disk_interface_->RemoveFile(lock_file_path_);
 }
 
-Node* Builder::AddTarget(const string& name, string* err) {
+Node* Builder::AddTarget(const std::string& name, std::string* err){
+  return AddTarget(name, Edge::kpriority_group_unassigned, err);
+}
+
+Node* Builder::AddTarget(const string& name, uint16_t prio, string* err) {
   Node* node = state_->LookupNode(name);
   if (!node) {
     *err = "unknown target: '" + name + "'";
     return NULL;
   }
-  if (!AddTarget(node, err))
+  if (!AddTarget(node, prio, err))
     return NULL;
   return node;
 }
 
 bool Builder::AddTarget(Node* target, string* err) {
+  return AddTarget(target, Edge::kpriority_group_unassigned, err);
+}
+
+bool Builder::AddTarget(Node* target, uint16_t prio, string* err) {
   std::vector<Node*> validation_nodes;
   if (!scan_.RecomputeDirty(target, &validation_nodes, err))
     return false;
 
   Edge* in_edge = target->in_edge();
   if (!in_edge || !in_edge->outputs_ready()) {
-    if (!plan_.AddTarget(target, err)) {
+    if (!plan_.AddTarget(target, prio, err)) {
       return false;
     }
   }
@@ -693,7 +708,7 @@ bool Builder::AddTarget(Node* target, string* err) {
        n != validation_nodes.end(); ++n) {
     if (Edge* validation_in_edge = (*n)->in_edge()) {
       if (!validation_in_edge->outputs_ready() &&
-          !plan_.AddTarget(*n, err)) {
+          !plan_.AddTarget(*n, prio, err)) {
         return false;
       }
     }

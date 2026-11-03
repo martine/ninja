@@ -217,6 +217,11 @@ struct Edge {
     critical_path_weight_ = critical_path_weight;
   }
 
+  uint16_t priority_group() const { return priority_group_; }
+  void set_priority_group(uint16_t priority_group) {
+    priority_group_ = priority_group;
+  }
+
   const Rule* rule_ = nullptr;
   Pool* pool_ = nullptr;
   std::vector<Node*> inputs_;
@@ -226,6 +231,8 @@ struct Edge {
   BindingEnv* env_ = nullptr;
   size_t id_ = 0;
   int64_t critical_path_weight_ = -1;
+  static constexpr uint16_t kpriority_group_unassigned = 0;
+  uint16_t priority_group_ = kpriority_group_unassigned;
 
   /// A Jobserver slot instance. Invalid by default.
   Jobserver::Slot job_slot_;
@@ -439,14 +446,24 @@ struct DependencyScan {
 };
 
 // Implements a less comparison for edges by priority, where highest
-// priority is defined lexicographically first by largest critical
-// time, then lowest ID.
+// priority is defined lexicographically first by largest priority
+// group, then largest critical path time, then lowest ID.
 //
-// Including ID means that wherever the critical path weights are the
-// same, the edges are executed in ascending ID order which was
-// historically how all tasks were scheduled.
+// Including ID means that wherever the priority groups and critical
+// path weights are the same, the edges are executed in ascending ID
+// order which was historically how all tasks were scheduled.
 struct EdgePriorityLess {
   bool operator()(const Edge* e1, const Edge* e2) const {
+    // first check the priority group
+    // default group has same priority as group 1
+    const int16_t pg1 = e1->priority_group() == 0 ? 1 : e1->priority_group();
+    const int16_t pg2 = e2->priority_group() == 0 ? 1 : e2->priority_group();
+
+    if (pg1 != pg2) {
+      return !(pg1 < pg2);
+    }
+
+    // priority groups are equal, now check path weight
     const int64_t cw1 = e1->critical_path_weight();
     const int64_t cw2 = e2->critical_path_weight();
     if (cw1 != cw2) {

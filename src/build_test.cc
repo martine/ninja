@@ -4637,3 +4637,62 @@ build d: cp c
   EXPECT_EQ("b: X", content);
   EXPECT_EQ("", err);
 }
+
+// Test the build order based on user input: 'ninja out1 out2 out3A'.
+TEST_F(BuildTest, Prioritize) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      R"ninja(
+build out2: cat in
+build out3: cat in
+build out1: cat in
+build out3A: cat out3
+)ninja"));
+
+  fs_.Create("in", "");
+
+  string err;
+  EXPECT_TRUE(builder_.AddTarget("out1", 1, &err));
+  EXPECT_TRUE(builder_.AddTarget("out2", 2, &err));
+  EXPECT_TRUE(builder_.AddTarget("out3A", 3, &err));
+  EXPECT_EQ("", err);
+
+  EXPECT_EQ(builder_.Build(&err), ExitSuccess);
+  EXPECT_EQ("", err);
+
+  ASSERT_EQ(4u, command_runner_.commands_ran_.size());
+  EXPECT_EQ("cat in > out1", command_runner_.commands_ran_[0]);
+  EXPECT_EQ("cat in > out2", command_runner_.commands_ran_[1]);
+  EXPECT_EQ("cat in > out3", command_runner_.commands_ran_[2]);
+  EXPECT_EQ("cat out3 > out3A", command_runner_.commands_ran_[3]);
+}
+
+// Same as 'BuildTest.Prioritize', but with a different command-line order:
+// 'ninja out3A out2 out1'.
+TEST_F(BuildTest, Prioritize2) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      R"ninja(
+build out1: cat in
+build out2: cat in
+build out3: cat in
+build out3A: cat out3
+)ninja"));
+
+  fs_.Create("in", "");
+
+  string err;
+
+  EXPECT_TRUE(builder_.AddTarget("out3A", 1, &err));
+  EXPECT_TRUE(builder_.AddTarget("out2", 2, &err));
+  EXPECT_TRUE(builder_.AddTarget("out1", 3, &err));
+
+  EXPECT_EQ("", err);
+
+  EXPECT_EQ(builder_.Build(&err), ExitSuccess);
+  EXPECT_EQ("", err);
+
+  ASSERT_EQ(4u, command_runner_.commands_ran_.size());
+  EXPECT_EQ("cat in > out3", command_runner_.commands_ran_[0]);
+  EXPECT_EQ("cat out3 > out3A", command_runner_.commands_ran_[1]);
+  EXPECT_EQ("cat in > out2", command_runner_.commands_ran_[2]);
+  EXPECT_EQ("cat in > out1", command_runner_.commands_ran_[3]);
+}

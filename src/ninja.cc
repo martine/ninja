@@ -19,8 +19,10 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <string>
 
 #ifdef _WIN32
@@ -166,9 +168,12 @@ struct NinjaMain : public BuildLogUser {
   /// spell correction.
   Node* CollectTarget(const char* cpath, string* err);
 
-  /// CollectTarget for all command-line arguments, filling in \a targets.
-  bool CollectTargetsFromArgs(int argc, char* argv[],
-                              vector<Node*>* targets, string* err);
+  /// CollectTarget for all command-line arguments. Returns the targets in
+  /// preserved order and a bool that is true if targets were specified on the
+  /// command line, or false if the default targets are used. On failure,
+  /// returns nullopt and sets \a err.
+  std::optional<std::pair<vector<Node*>, bool>> CollectTargetsFromArgs(
+      int argc, char* argv[], string* err);
 
   // The various subcommands, run via "-t XXX".
   int ToolGraph(const Options* options, int argc, char* argv[]);
@@ -431,29 +436,35 @@ Node* NinjaMain::CollectTarget(const char* cpath, string* err) {
   }
 }
 
-bool NinjaMain::CollectTargetsFromArgs(int argc, char* argv[],
-                                       vector<Node*>* targets, string* err) {
+std::optional<std::pair<vector<Node*>, bool>> NinjaMain::CollectTargetsFromArgs(
+    int argc, char* argv[], string* err) {
+  vector<Node*> targets;
   if (argc == 0) {
-    *targets = state_.DefaultNodes(err);
-    return err->empty();
+    targets = state_.DefaultNodes(err);
+    if (err->empty())
+      return { { targets, true } };
+    else
+      return std::nullopt;
   }
 
   for (int i = 0; i < argc; ++i) {
     Node* node = CollectTarget(argv[i], err);
     if (node == NULL)
-      return false;
-    targets->push_back(node);
+      return std::nullopt;
+    targets.push_back(node);
   }
-  return true;
+  return { { targets, false } };
 }
 
 int NinjaMain::ToolGraph(const Options* options, int argc, char* argv[]) {
-  vector<Node*> nodes;
   string err;
-  if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!collected) {
     Error("%s", err.c_str());
     return 1;
   }
+
+  vector<Node*>& nodes(collected->first);
 
   GraphViz graph(&state_, &disk_interface_);
   graph.Start();
@@ -626,10 +637,13 @@ int NinjaMain::ToolDeps(const Options* options, int argc, char** argv) {
     }
   } else {
     string err;
-    if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+    auto collected = CollectTargetsFromArgs(argc, argv, &err);
+    if (!collected) {
       Error("%s", err.c_str());
       return 1;
     }
+
+    nodes = std::move(collected->first);
   }
 
   RealDiskInterface disk_interface;
@@ -657,12 +671,14 @@ int NinjaMain::ToolDeps(const Options* options, int argc, char** argv) {
 }
 
 int NinjaMain::ToolMissingDeps(const Options* options, int argc, char** argv) {
-  vector<Node*> nodes;
   string err;
-  if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!collected) {
     Error("%s", err.c_str());
     return 1;
   }
+
+  vector<Node*>& nodes(collected->first);
   RealDiskInterface disk_interface;
   MissingDependencyPrinter printer;
   MissingDependencyScanner scanner(&printer, &deps_log_, &state_,
@@ -820,13 +836,14 @@ int NinjaMain::ToolCommands(const Options* options, int argc, char* argv[]) {
   argv += optind;
   argc -= optind;
 
-  vector<Node*> nodes;
   string err;
-  if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!CollectTargetsFromArgs(argc, argv, &err)) {
     Error("%s", err.c_str());
     return 1;
   }
 
+  vector<Node*>& nodes(collected->first);
   EdgeSet seen;
   for (vector<Node*>::iterator in = nodes.begin(); in != nodes.end(); ++in)
     PrintCommands((*in)->in_edge(), &seen, mode);
@@ -885,13 +902,14 @@ int NinjaMain::ToolInputs(const Options* options, int argc, char* argv[]) {
   argv += optind;
   argc -= optind;
 
-  std::vector<Node*> nodes;
   std::string err;
-  if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!collected) {
     Error("%s", err.c_str());
     return 1;
   }
 
+  std::vector<Node*>& nodes(collected->first);
   InputsCollector collector;
   for (const Node* node : nodes)
     collector.VisitNode(node);
@@ -959,13 +977,14 @@ int NinjaMain::ToolMultiInputs(const Options* options, int argc, char* argv[]) {
   argv += optind;
   argc -= optind;
 
-  std::vector<Node*> nodes;
   std::string err;
-  if (!CollectTargetsFromArgs(argc, argv, &nodes, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!collected) {
     Error("%s", err.c_str());
     return 1;
   }
 
+  std::vector<Node*> nodes(collected->first);
   for (const Node* node : nodes) {
     InputsCollector collector;
 
@@ -1748,11 +1767,14 @@ void JobserverState::SetupClient(const BuildConfig& config, Status* status) {
 
 ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   std::string err;
-  std::vector<Node*> targets;
-  if (!CollectTargetsFromArgs(argc, argv, &targets, &err)) {
+  auto collected = CollectTargetsFromArgs(argc, argv, &err);
+  if (!collected) {
     status->Error("%s", err.c_str());
     return ExitFailure;
   }
+
+  const std::vector<Node*>& targets(collected->first);
+  const bool from_command_line = collected->second;
 
   disk_interface_.AllowStatCache(g_experimental_statcache);
 
@@ -1767,7 +1789,16 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   }
 
   for (size_t i = 0; i < targets.size(); ++i) {
-    if (!builder.AddTarget(targets[i], &err)) {
+    const uint16_t prio = [&]() {
+      // if no targets form Args are given, the default targets shall be all in the
+      // same priority group
+      if (from_command_line)
+        return static_cast<uint16_t>(Edge::kpriority_group_unassigned + 1);
+      else
+        return static_cast<uint16_t>(std::min<size_t>(i + 1, UINT16_MAX));
+    }();
+
+    if (!builder.AddTarget(targets[i], prio, &err)) {
       if (!err.empty()) {
         status->Error("%s", err.c_str());
         return ExitFailure;
