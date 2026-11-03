@@ -84,8 +84,8 @@ struct BuildLog {
   /// Lookup a previously-run command by its output path.
   LogEntry* LookupByOutput(const std::string& path) const;
 
-  /// Return whether the directory input |dir| (see Node::is_directory()) was
-  /// missing when the command for |output| last ran.
+  /// Return whether the directory input |dir| (see Node::is_directory_input())
+  /// was missing when the command for |output| last ran.
   bool WasDirectoryMissing(const std::string& output,
                            const std::string& dir) const;
 

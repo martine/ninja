@@ -100,7 +100,7 @@ bool BuildLog::RecordCommand(Edge* edge, int start_time, int end_time,
   std::vector<std::string> missing_dirs;
   for (size_t i = 0; i < edge->inputs_.size(); ++i) {
     const Node* input = edge->inputs_[i];
-    if (input->is_directory() && !edge->is_order_only(i) &&
+    if (input->is_directory_input() && !edge->is_order_only(i) &&
         input->status_known() && !input->exists() &&
         std::find(missing_dirs.begin(), missing_dirs.end(), input->path()) ==
             missing_dirs.end()) {

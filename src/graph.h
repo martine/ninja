@@ -114,7 +114,9 @@ struct Node {
   /// trailing slash in the manifest. Such a node is never dirty and a missing
   /// directory is not an error. A path that isn't a directory is treated like
   /// a missing one. See Node::Stat().
-  bool is_directory() const { return !path_.empty() && path_.back() == '/'; }
+  bool is_directory_input() const {
+    return !path_.empty() && path_.back() == '/';
+  }
 
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
@@ -133,7 +135,7 @@ struct Node {
 private:
   /// Stat() for directory inputs. A missing directory isn't an error, and a
   /// path that isn't a directory is treated like a missing one.
-  bool StatDirectory(DiskInterface* disk_interface, std::string* err);
+  bool StatDirectoryInput(DiskInterface* disk_interface, std::string* err);
 
   std::string path_;
 

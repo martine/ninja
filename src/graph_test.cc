@@ -1266,8 +1266,8 @@ TEST_F(GraphTest, DirectoryInputParsed) {
 "build out: cat ./indir/ indir/sub/../ indir\n"));
 
   Node* dir_node = state_.LookupNode("indir/");
-  EXPECT_TRUE(dir_node->is_directory());
-  EXPECT_FALSE(GetNode("indir")->is_directory());
+  EXPECT_TRUE(dir_node->is_directory_input());
+  EXPECT_FALSE(GetNode("indir")->is_directory_input());
   Edge* edge = GetNode("out")->in_edge();
   ASSERT_EQ(3u, edge->inputs_.size());
   EXPECT_EQ(dir_node, edge->inputs_[0]);

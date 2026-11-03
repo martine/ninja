@@ -129,9 +129,9 @@ class RecomputeOutputsDirtyCache {
   bool RecomputeOutputDirty(const Node* output, const Node* most_recent_input,
                             CachedLogEntry& entry);
 
-  /// Checks whether a directory input of `edge_` (see Node::is_directory()) was
-  /// created or removed since `output` was last built, according to the build
-  /// log. Returns true if so.
+  /// Checks whether a directory input of `edge_` (see
+  /// Node::is_directory_input()) was created or removed since `output` was last
+  /// built, according to the build log. Returns true if so.
   bool DirectoryInputChanged(const Node* output);
 
   /// Dirty check for phony edges.
@@ -202,7 +202,7 @@ bool RecomputeOutputsDirtyCache::DirectoryInputChanged(const Node* output) {
   if (!directoryInputsValid_) {
     directoryInputsValid_ = true;
     for (std::size_t i = 0; i != edge_->inputs_.size(); ++i) {
-      if (edge_->inputs_[i]->is_directory() &&
+      if (edge_->inputs_[i]->is_directory_input() &&
           i < edge_->inputs_.size() - edge_->order_only_deps_) {
         directoryInputs_.push_back(edge_->inputs_[i]);
       }
@@ -332,8 +332,8 @@ bool RecomputeOutputsDirtyCache::RecomputeOutputDirty(
 }  // namespace
 
 bool Node::Stat(DiskInterface* disk_interface, string* err) {
-  if (is_directory()) {
-    return StatDirectory(disk_interface, err);
+  if (is_directory_input()) {
+    return StatDirectoryInput(disk_interface, err);
   }
   mtime_ = disk_interface->Stat(path_, err);
   if (mtime_ == -1) {
@@ -343,7 +343,8 @@ bool Node::Stat(DiskInterface* disk_interface, string* err) {
   return true;
 }
 
-bool Node::StatDirectory(DiskInterface* disk_interface, std::string* err) {
+bool Node::StatDirectoryInput(DiskInterface* disk_interface,
+                              std::string* err) {
   // Stat the directory without its trailing slash, which not every
   // DiskInterface implementation handles. Its mtime changes whenever entries
   // are added to, removed from or renamed in it.
@@ -465,7 +466,7 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
       return false;
     // Directory inputs are never dirty, not even when missing. They only
     // affect their dependents through their mtime.
-    if (node->is_directory()) {
+    if (node->is_directory_input()) {
       node->set_dirty(false);
       return true;
     }

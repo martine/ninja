@@ -33,7 +33,7 @@ using namespace std;
 namespace {
 
 /// Like CanonicalizePath(), but keeps a trailing path separator, which marks
-/// the input as a directory (see Node::is_directory()).
+/// the input as a directory (see Node::is_directory_input()).
 void CanonicalizeInputPath(std::string* path, uint64_t* slash_bits) {
   const char last = path->back();
 #ifdef _WIN32
