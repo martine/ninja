@@ -19,6 +19,7 @@
 
 #ifndef _WIN32
 // SetWithLots need setrlimit.
+#include <signal.h>
 #include <stdio.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -164,6 +165,24 @@ TEST_F(SubprocessTest, InterruptChildWithSigHup) {
   }
 
   EXPECT_EQ(ExitInterrupted, subproc->Finish());
+}
+
+TEST_F(SubprocessTest, NotInterruptChildWithNoHup) {
+  struct sigaction nohup, hup;
+
+  memset(&nohup, 0, sizeof(struct sigaction));
+  nohup.sa_handler = SIG_IGN;
+  sigaction(SIGHUP, &nohup, &hup);
+
+  Subprocess* subproc = subprocs_.Add("kill -HUP $$");
+  ASSERT_NE((Subprocess *) 0, subproc);
+
+  while (!subproc->Done()) {
+    subprocs_.DoWork();
+  }
+
+  EXPECT_EQ(ExitSuccess, subproc->Finish());
+  sigaction(SIGHUP, &hup, nullptr);
 }
 
 TEST_F(SubprocessTest, InterruptParentWithSigHup) {

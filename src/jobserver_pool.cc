@@ -177,7 +177,9 @@ class PosixJobserverPool : public JobserverPool {
     }
     fifo_.resize(static_cast<size_t>(len));
 
-    int ret = mknod(fifo_.c_str(), S_IFIFO | 0666, 0);
+    // Only the owner may open the fifo, as with GNU Make: any process that
+    // can open it is able to take job slots out of the pool or add new ones.
+    int ret = mknod(fifo_.c_str(), S_IFIFO | 0600, 0);
     if (ret < 0) {
       *error = std::string("Cannot create fifo: ") + strerror(errno);
       return false;

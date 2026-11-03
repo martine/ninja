@@ -264,11 +264,20 @@ SubprocessSet::SubprocessSet() {
   struct sigaction act;
   memset(&act, 0, sizeof(act));
   act.sa_handler = SetInterruptedFlag;
+
+  // Check if SIGHUP is ignored, e.g. using nohup.
+  if (sigaction(SIGHUP, nullptr, &old_hup_act_) < 0)
+    Fatal("sigaction: %s", strerror(errno));
+
+  // Change the child handler of SIGHUP if not ignored.
+  if (old_hup_act_.sa_handler != SIG_IGN) {
+    if (sigaction(SIGHUP, &act, nullptr) < 0)
+      Fatal("sigaction: %s", strerror(errno));
+  }
+
   if (sigaction(SIGINT, &act, &old_int_act_) < 0)
     Fatal("sigaction: %s", strerror(errno));
   if (sigaction(SIGTERM, &act, &old_term_act_) < 0)
-    Fatal("sigaction: %s", strerror(errno));
-  if (sigaction(SIGHUP, &act, &old_hup_act_) < 0)
     Fatal("sigaction: %s", strerror(errno));
 
   memset(&act, 0, sizeof(act));

@@ -165,7 +165,7 @@ else:  # !_IS_WINDOWS
             os.remove(path)
 
         # mypy complains that this does not exit on Windows.
-        os.mkfifo(path)  # type: ignore
+        os.mkfifo(path, 0o600)  # type: ignore
 
         read_fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         write_fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)

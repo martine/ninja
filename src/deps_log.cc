@@ -226,7 +226,7 @@ LoadStatus DepsLog::Load(const string& path, State* state, string* err) {
 
       for (int i = 0; i < deps_count; ++i) {
         int node_id = deps_data[i];
-        if (node_id >= (int)nodes_.size() || !nodes_[node_id]) {
+        if (node_id < 0 || node_id >= (int)nodes_.size() || !nodes_[node_id]) {
           read_failed = true;
           break;
         }

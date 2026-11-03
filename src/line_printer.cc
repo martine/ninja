@@ -177,8 +177,12 @@ void LinePrinter::SetConsoleLocked(bool locked) {
   if (locked == console_locked_)
     return;
 
-  if (locked)
+  if (locked) {
     PrintOnNewLine("");
+    // The console job writes to the console directly, so make sure the
+    // newline is out first. On Windows, stdout to a console is fully buffered.
+    fflush(stdout);
+  }
 
   console_locked_ = locked;
 

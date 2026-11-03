@@ -232,18 +232,14 @@ def compute_max_overlapped_spans(build_dir: str, command_count: int) -> int:
         return 0
 
     spans: T.List[T.Tuple[int, int]] = get_spans(build_dir, command_count)
-    # Stupid but simple, for each span, count the number of other spans that overlap it.
-    max_overlaps = 1
-    for n in range(command_count):
-        cur_start, cur_end = spans[n]
-        cur_overlaps = 1
-        for m in range(command_count):
-            other_start, other_end = spans[m]
-            if n != m and other_end > cur_start and other_start < cur_end:
-                cur_overlaps += 1
-
-        if cur_overlaps > max_overlaps:
-            max_overlaps = cur_overlaps
+    # The most spans running at the same time. At equal times, ends
+    # come before starts.
+    events = sorted([(start, 1) for start, _ in spans] +
+                    [(end, -1) for _, end in spans])
+    max_overlaps = running = 0
+    for _, delta in events:
+        running += delta
+        max_overlaps = max(max_overlaps, running)
 
     return max_overlaps
 

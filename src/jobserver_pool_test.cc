@@ -18,7 +18,10 @@
 #include "test.h"
 
 #ifndef _WIN32
+#include <errno.h>
 #include <fcntl.h>
+#include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -65,3 +68,28 @@ TEST(JobserverPoolTest, DefaultPool) {
   slot = client->TryAcquire();
   EXPECT_FALSE(slot.IsValid());
 }
+
+#ifndef _WIN32
+// The fifo is created in a shared temporary directory, so only its owner
+// should be able to open it: any process that can is able to take job slots
+// out of the pool, or to add new ones.
+TEST(JobserverPoolTest, FifoIsOwnerOnly) {
+  // Clear the umask so the mode requested by the pool is what ends up on disk.
+  mode_t old_umask = umask(0);
+  std::string error;
+  auto pool = JobserverPool::Create(2, &error);
+  umask(old_umask);
+  ASSERT_TRUE(pool.get()) << error;
+
+  std::string makeflags = pool->GetEnvMakeFlagsValue();
+  Jobserver::Config config;
+  ASSERT_TRUE(
+      Jobserver::ParseMakeFlagsValue(makeflags.c_str(), &config, &error));
+  ASSERT_EQ(Jobserver::Config::kModePosixFifo, config.mode);
+
+  struct stat info;
+  ASSERT_EQ(0, stat(config.path.c_str(), &info)) << strerror(errno);
+  EXPECT_TRUE(S_ISFIFO(info.st_mode));
+  EXPECT_EQ(0, static_cast<int>(info.st_mode & (S_IRWXG | S_IRWXO)));
+}
+#endif  // !_WIN32

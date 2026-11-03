@@ -710,6 +710,32 @@ TEST_F(DepsLogTest, MalformedDepsLog) {
     ASSERT_EQ(LOAD_SUCCESS, log.Load(kBadLogFile, &state, &err));
     ASSERT_EQ("premature end of file; recovering", err);
   }
+
+  // A negative input ID must discard the new record, preserving earlier deps.
+  const uint32_t kNegativeInputRecord[] = {0x80000010u, 0, 0, 0, 0xffffffffu};
+  bad_contents = original_contents;
+  bad_contents.append(reinterpret_cast<const char*>(kNegativeInputRecord),
+                      sizeof(kNegativeInputRecord));
+  ASSERT_TRUE(write_bad_log_file(bad_contents)) << strerror(errno);
+  {
+    State state;
+    DepsLog log;
+    err.clear();
+    ASSERT_EQ(LOAD_SUCCESS, log.Load(kBadLogFile, &state, &err));
+    ASSERT_EQ("premature end of file; recovering", err);
+
+    DepsLog::Deps* deps = log.GetDeps(state.GetNode("out.o", 0));
+    ASSERT_TRUE(deps);
+    ASSERT_EQ(1, deps->mtime);
+    ASSERT_EQ(2, deps->node_count);
+    EXPECT_EQ("foo.hh", deps->nodes[0]->path());
+    EXPECT_EQ("bar.hpp", deps->nodes[1]->path());
+
+    std::string recovered_contents;
+    ASSERT_EQ(FileReader::Okay,
+              disk.ReadFile(kBadLogFile, &recovered_contents, &err));
+    EXPECT_EQ(original_contents, recovered_contents);
+  }
 }
 
 // Verify that recovery correctly removes a structurally-valid but

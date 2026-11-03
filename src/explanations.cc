@@ -51,7 +51,10 @@ void Explanations::Record(const void* item, const char* fmt, ...) {
 void Explanations::RecordArgs(const void* item, const char* fmt, va_list args) {
   char buffer[1024];
   vsnprintf(buffer, sizeof(buffer), fmt, args);
-  map_[item].emplace_back(buffer);
+  auto& explanations = map_[item];
+  if (explanations.empty() || explanations.back() != buffer) {
+    explanations.emplace_back(buffer);
+  }
 }
 
 void Explanations::ExplainEdge(const Edge* edge) {

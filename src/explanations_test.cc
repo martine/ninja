@@ -28,6 +28,7 @@ TEST(Explanations, Explanations) {
   Explanations exp;
 
   exp.Record(MakeItem(1), "first explanation");
+  exp.Record(MakeItem(1), "first explanation");
   exp.Record(MakeItem(1), "second explanation");
   exp.Record(MakeItem(2), "third explanation");
   exp.Record(MakeItem(2), "fourth %s", "explanation");

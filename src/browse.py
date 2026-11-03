@@ -163,8 +163,26 @@ def ninja_dump(target: str) -> Tuple[str, str, int]:
                             universal_newlines=True)
     return proc.communicate() + (proc.returncode,)
 
+LOOPBACK_NAMES = ('localhost', '127.0.0.1', '::1')
+
+def is_loopback_host(host: str) -> bool:
+    # Strip the port from a Host header value, e.g. "[::1]:8000".
+    if host.startswith('['):
+        name = host[1:].split(']', 1)[0]
+    else:
+        name = host.split(':', 1)[0]
+    return name.lower() in LOOPBACK_NAMES
+
 class RequestHandler(httpserver.BaseHTTPRequestHandler):
     def do_GET(self) -> None:
+        # When serving on loopback only, refuse requests that name another
+        # host so a DNS-rebinding web page cannot read the build graph.
+        if args.hostname in LOOPBACK_NAMES and \
+                not is_loopback_host(self.headers.get('Host', '')):
+            self.send_response(403)
+            self.end_headers()
+            return
+
         assert self.path[0] == '/'
         target = unquote(self.path[1:])
 

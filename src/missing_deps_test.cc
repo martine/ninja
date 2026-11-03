@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
+#include <set>
 #include <memory>
 
 #include "deps_log.h"
@@ -52,9 +54,8 @@ struct MissingDependencyScannerTest : public testing::Test {
     std::string err;
     std::vector<Node*> nodes = state_.RootNodes(&err);
     EXPECT_EQ("", err);
-    for (std::vector<Node*>::iterator it = nodes.begin(); it != nodes.end();
-         ++it) {
-      scanner().ProcessNode(*it);
+    for (Node* it : nodes) {
+      scanner().ProcessNode(it);
     }
   }
 
@@ -164,4 +165,85 @@ TEST_F(MissingDependencyScannerTest, CycleInGraph) {
   std::string err;
   std::vector<Node*> nodes = state_.RootNodes(&err);
   ASSERT_NE("", err);
+}
+
+class MissingDependencyCheckDelegate : public MissingDependencyScannerDelegate {
+  void OnMissingDep(Node* node, const std::string& path,
+                    const Rule& generator) {
+    data_.insert({ node->path(), path, generator.name() });
+  }
+
+ public:
+  using type_ = std::set<std::array<std::string, 3>>;
+  type_ data_;
+};
+
+struct MissingDependencyScannerTestWithDepfile
+    : public StateTestWithBuiltinRules {
+  MissingDependencyScannerTestWithDepfile()
+      : scan_(&state_, NULL, NULL, &fs_, NULL, NULL),
+        scanner_(&delegate_, &deps_log_, &state_, &fs_) {
+    std::string err;
+    deps_log_.OpenForWrite(kTestDepsLogFilename, &err);
+    EXPECT_EQ("", err);
+  }
+
+  void ProcessAllNodes() {
+    std::string err;
+    std::vector<Node*> nodes = state_.RootNodes(&err);
+    EXPECT_EQ("", err);
+    for (Node* it : nodes) {
+      scanner().ProcessNode(it);
+    }
+  }
+
+  MissingDependencyScanner& scanner() { return scanner_; }
+
+  VirtualFileSystem fs_;
+  MissingDependencyCheckDelegate delegate_;
+  DepsLog deps_log_;
+  DependencyScan scan_;
+  MissingDependencyScanner scanner_;
+};
+
+TEST_F(MissingDependencyScannerTestWithDepfile, MissingDepPresent) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_, R"ninja(
+rule catdep
+  depfile = a.d
+  command = cat $in > $out && echo 'a.o: generated.h\n' > a.d
+build a.o: catdep a.c
+
+rule touch
+  command = touch $out
+build generated.h: touch in
+)ninja"));
+
+  fs_.Create("a.d", "a.o: generated.h\n");
+
+  ProcessAllNodes();
+  EXPECT_TRUE(scanner().HadMissingDeps());
+  EXPECT_EQ(1u, scanner().nodes_missing_deps_.size());
+  EXPECT_EQ(1u, scanner().missing_dep_path_count_);
+  EXPECT_EQ(delegate_.data_, MissingDependencyCheckDelegate::type_(
+                                 { { "a.o", "generated.h", "touch" } }));
+}
+
+TEST_F(MissingDependencyScannerTestWithDepfile, MissingDepFixedIndirect) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_, R"ninja(
+rule catdep
+  depfile = a.d
+  command = cat $in > $out && echo 'a.o: generated_dep.h\n' > a.d
+build a.o: catdep a.c generated_manifest.h
+
+rule touch
+  command = touch $out
+build generated_dep.h: touch in
+build generated_manifest.h: touch generated_dep.h
+)ninja"));
+
+  fs_.Create("a.d", "a.o: generated_dep.h\n");
+
+  ProcessAllNodes();
+  EXPECT_FALSE(scanner().HadMissingDeps());
+  EXPECT_EQ(delegate_.data_, MissingDependencyCheckDelegate::type_());
 }
