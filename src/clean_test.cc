@@ -618,4 +618,36 @@ TEST_F(CleanDeadTest, CleanDeadPreservesInputs) {
   EXPECT_NE(0, fs_.Stat("out2", &err));
   log2.Close();
 }
+
+#ifdef _WIN32
+TEST_F(CleanDeadTest, CleanDeadCaseInsensitive) {
+  State state;
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state,
+ "rule cat\n"
+ "  command = cat $in > $out\n"
+ "build out: cat in\n"));
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+ "build OUT: cat in\n"));
+  fs_.Create("in", "");
+  fs_.Create("out", "");
+
+  BuildLog log;
+  string err;
+  EXPECT_TRUE(log.OpenForWrite(kTestFilename, *this, &err));
+  ASSERT_EQ("", err);
+  ASSERT_TRUE(log.RecordCommand(state.edges_[0], 15, 18));
+  log.Close();
+
+  BuildLog loaded_log;
+  EXPECT_TRUE(loaded_log.Load(kTestFilename, &err));
+  ASSERT_EQ("", err);
+  ASSERT_EQ(1u, loaded_log.entries().size());
+
+  Cleaner cleaner(&state_, config_, &fs_);
+  EXPECT_EQ(0, cleaner.CleanDead(loaded_log.entries()));
+  EXPECT_EQ(0, cleaner.cleaned_files_count());
+  EXPECT_EQ(0u, fs_.files_removed_.size());
+  EXPECT_NE(0, fs_.Stat("out", &err));
+}
+#endif  // _WIN32
 }  // anonymous namespace

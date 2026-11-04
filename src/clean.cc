@@ -20,9 +20,27 @@
 #include "disk_interface.h"
 #include "graph.h"
 #include "state.h"
+#ifdef _WIN32
+#include "string_piece_util.h"
+#endif
 #include "util.h"
 
 using namespace std;
+
+#ifdef _WIN32
+namespace {
+
+Node* LookupNodeCaseInsensitive(const State* state, StringPiece path) {
+  for (State::Paths::const_iterator i = state->paths_.begin();
+       i != state->paths_.end(); ++i) {
+    if (EqualsCaseInsensitiveASCII(i->first, path))
+      return i->second;
+  }
+  return NULL;
+}
+
+}  // namespace
+#endif
 
 Cleaner::Cleaner(State* state,
                  const BuildConfig& config,
@@ -130,6 +148,12 @@ int Cleaner::CleanDead(const BuildLog::Entries& entries) {
   LoadDyndeps();
   for (BuildLog::Entries::const_iterator i = entries.begin(); i != entries.end(); ++i) {
     Node* n = state_->LookupNode(i->first);
+#ifdef _WIN32
+    // Keep normal node lookup case-sensitive, but match existing log entries
+    // to the current graph as Windows would match them on disk.
+    if (!n)
+      n = LookupNodeCaseInsensitive(state_, i->first);
+#endif
     // Detecting stale outputs works as follows:
     //
     // - If it has no Node, it is not in the build graph, or the deps log
