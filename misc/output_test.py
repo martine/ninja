@@ -722,6 +722,16 @@ build foo: sleep
                     proc.wait()
                     self.assertEqual(proc.returncode, 130, msg=f"For signal {signum}")
 
+    def test_issue_1336(self) -> None:
+        # Console-pool edges print their status when they start, before the
+        # edge has finished. The step count must still include that edge
+        # (#1336); otherwise the last step is numbered one too low.
+        print_lines = ('rule echo\n'
+                       '  command = echo\n'
+                       '  pool = console\n'
+                       'build a: echo\n')
+        self.assertEqual(run(print_lines, pipe=True), '[1/1] echo\n\n')
+
 
 if __name__ == '__main__':
     unittest.main()

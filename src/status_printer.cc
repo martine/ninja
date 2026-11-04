@@ -120,8 +120,13 @@ void StatusPrinter::BuildEdgeStarted(const Edge* edge,
   ++running_edges_;
   time_millis_ = start_time_millis;
 
-  if (edge->use_console() || printer_.is_smart_terminal())
-    PrintStatus(edge, start_time_millis);
+  if (edge->use_console() || printer_.is_smart_terminal()) {
+    // Console-pool commands write straight to the terminal, so this is the
+    // only status line they get. Count the edge in the finished tally so
+    // [%f/%t] matches the step number shown for other edges on completion.
+    PrintStatus(edge, start_time_millis,
+                /*count_edge_as_finished=*/edge->use_console());
+  }
 
   if (edge->use_console())
     printer_.SetConsoleLocked(true);
@@ -332,7 +337,7 @@ string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
 
         // Finished edges.
       case 'f':
-        snprintf(buf, sizeof(buf), "%d", finished_edges_);
+        snprintf(buf, sizeof(buf), "%d", FinishedEdgesForStatus());
         out += buf;
         break;
 
@@ -352,8 +357,9 @@ string StatusPrinter::FormatProgressStatus(const char* progress_status_format,
         // Percentage of edges completed
       case 'p': {
         int percent = 0;
-        if (finished_edges_ != 0 && total_edges_ != 0)
-          percent = (100 * finished_edges_) / total_edges_;
+        int finished = FinishedEdgesForStatus();
+        if (finished != 0 && total_edges_ != 0)
+          percent = (100 * finished) / total_edges_;
         snprintf(buf, sizeof(buf), "%3i%%", percent);
         out += buf;
         break;
@@ -457,7 +463,7 @@ string StatusPrinter::FormatStatusVariable(StringPiece name) const {
     return buf;
   }
   if (name == "finished") {
-    snprintf(buf, sizeof(buf), "%d", finished_edges_);
+    snprintf(buf, sizeof(buf), "%d", FinishedEdgesForStatus());
     return buf;
   }
   if (name == "rate") {
@@ -471,8 +477,9 @@ string StatusPrinter::FormatStatusVariable(StringPiece name) const {
   }
   if (name == "progress") {
     int percent = 0;
-    if (finished_edges_ != 0 && total_edges_ != 0)
-      percent = (100 * finished_edges_) / total_edges_;
+    int finished = FinishedEdgesForStatus();
+    if (finished != 0 && total_edges_ != 0)
+      percent = (100 * finished) / total_edges_;
     snprintf(buf, sizeof(buf), "%3i%%", percent);
     return buf;
   }
@@ -510,7 +517,12 @@ string StatusPrinter::FormatStatusVariable(StringPiece name) const {
   return "";
 }
 
-void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
+int StatusPrinter::FinishedEdgesForStatus() const {
+  return finished_edges_ + finished_display_adjust_;
+}
+
+void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis,
+                                bool count_edge_as_finished) {
   if (explanations_) {
     explanations_->ExplainEdge(edge);
   }
@@ -520,6 +532,7 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
     return;
 
   RecalculateProgressPrediction();
+  finished_display_adjust_ = count_edge_as_finished ? 1 : 0;
 
   bool force_full_command = config_.verbosity == BuildConfig::VERBOSE;
 
@@ -542,6 +555,7 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
 
   printer_.Print(to_print,
                  force_full_command ? LinePrinter::FULL : LinePrinter::ELIDE);
+  finished_display_adjust_ = 0;
 }
 
 void StatusPrinter::NewLine() {

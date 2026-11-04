@@ -64,11 +64,25 @@ struct StatusPrinter : Status {
   }
 
  private:
-  void PrintStatus(const Edge* edge, int64_t time_millis);
+  /// Format and print the status line for \a edge.
+  ///
+  /// \a count_edge_as_finished includes \a edge in the finished tally. Console
+  /// pool edges print their only status line when they start, before
+  /// finished_edges_ is incremented; without this the step number is one
+  /// too low (#1336).
+  void PrintStatus(const Edge* edge, int64_t time_millis,
+                   bool count_edge_as_finished = false);
+
+  /// Finished-edge count to show in the status line.
+  int FinishedEdgesForStatus() const;
 
   const BuildConfig& config_;
 
   int started_edges_, finished_edges_, total_edges_, running_edges_;
+
+  /// Added to finished_edges_ while formatting a status line printed before
+  /// the edge has finished. See PrintStatus().
+  int finished_display_adjust_ = 0;
 
   /// How much wall clock elapsed so far?
   int64_t time_millis_ = 0;
