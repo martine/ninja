@@ -182,6 +182,12 @@ TEST_F(DiskInterfaceTest, StatCache) {
   EXPECT_EQ("", err);
   EXPECT_GT(disk_.Stat("sUbdir\\suBFile1", &err), 1);
   EXPECT_EQ("", err);
+  EXPECT_GT(disk_.Stat("subdir./subfile1", &err), 1);
+  EXPECT_EQ("", err);
+  EXPECT_GT(disk_.Stat("subdir/subfile1.", &err), 1);
+  EXPECT_EQ("", err);
+  EXPECT_GT(disk_.Stat("subdir/SUBFILE2   ", &err), 1);
+  EXPECT_EQ("", err);
 
   EXPECT_GT(disk_.Stat("..", &err), 1);
   EXPECT_EQ("", err);

@@ -64,6 +64,20 @@ int MakeDir(const string& path) {
 }
 
 #ifdef _WIN32
+string NormalizeWindowsPathComponent(string path) {
+  transform(path.begin(), path.end(), path.begin(), [](unsigned char c) {
+    return static_cast<char>(::tolower(c));
+  });
+
+  // Win32 path lookup ignores trailing dots and spaces in path components.
+  if (path != "." && path != "..") {
+    const string::size_type end = path.find_last_not_of(". ");
+    if (end != string::npos)
+      path.erase(end + 1);
+  }
+  return path;
+}
+
 TimeStamp TimeStampFromFileTime(const FILETIME& filetime) {
   // FILETIME is in 100-nanosecond increments since the Windows epoch.
   // We don't much care about epoch correctness but we do want the
@@ -145,17 +159,12 @@ bool StatAllFilesInDir(const string& dir, map<string, TimeStamp>* stamps,
     return false;
   }
   do {
-    string lowername = ffd.cFileName;
+    string lowername = NormalizeWindowsPathComponent(ffd.cFileName);
     if (lowername == "..") {
       // Seems to just copy the timestamp for ".." from ".", which is wrong.
       // This is the case at least on NTFS under Windows 7.
       continue;
     }
-
-    transform(lowername.begin(), lowername.end(), lowername.begin(),
-              [](unsigned char c) {
-                return static_cast<char>(::tolower(c));
-              });
 
     if (ffd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
       // File is a symlink, stat the linked file.
@@ -239,12 +248,8 @@ TimeStamp RealDiskInterface::Stat(const string& path, string* err) const {
     dir = path;
   }
 
-  string dir_lowercase = dir;
-  auto to_lower = [](unsigned char c) {
-    return static_cast<char>(::tolower(c));
-  };
-  transform(dir.begin(), dir.end(), dir_lowercase.begin(), to_lower);
-  transform(base.begin(), base.end(), base.begin(), to_lower);
+  string dir_lowercase = NormalizeWindowsPathComponent(dir);
+  base = NormalizeWindowsPathComponent(base);
 
   Cache::iterator ci = cache_.find(dir_lowercase);
   if (ci == cache_.end()) {
