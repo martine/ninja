@@ -14,24 +14,63 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""measure the runtime of a command by repeatedly running it.
+"""measure the runtime and peak memory of a command by repeatedly running it.
 """
 
 import time
 import subprocess
 import sys
-from typing import Union, List
+from typing import Dict, Union, List
 
-devnull = open('/dev/null', 'w')
+Command = Union[str, List[str]]
 
-def run(cmd: Union[str, List[str]], repeat: int = 10) -> None:
+if sys.platform == 'win32':
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD)] + [
+            (name, ctypes.c_size_t) for name in (
+                'PeakWorkingSetSize', 'WorkingSetSize',
+                'QuotaPeakPagedPoolUsage', 'QuotaPagedPoolUsage',
+                'QuotaPeakNonPagedPoolUsage', 'QuotaNonPagedPoolUsage',
+                'PagefileUsage', 'PeakPagefileUsage')]
+
+    def run_once(cmd: Command) -> Dict[str, int]:
+        """Run cmd and return its peak memory use in bytes."""
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        p.wait()
+        counters = PROCESS_MEMORY_COUNTERS(cb=ctypes.sizeof(PROCESS_MEMORY_COUNTERS))
+        # The process has exited, but while its handle is open its final
+        # counters can still be read.
+        ctypes.windll.psapi.GetProcessMemoryInfo(
+            wintypes.HANDLE(int(p._handle)), ctypes.byref(counters), counters.cb)
+        return {'peak memory': counters.PeakWorkingSetSize,
+                'peak commit': counters.PeakPagefileUsage}
+else:
+    import os
+
+    def run_once(cmd: Command) -> Dict[str, int]:
+        """Run cmd and return its peak memory use in bytes."""
+        p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        _, status, usage = os.wait4(p.pid, 0)
+        p.returncode = os.waitstatus_to_exitcode(status)
+        # ru_maxrss is in KiB on Linux, but in bytes on macOS.
+        scale = 1 if sys.platform == 'darwin' else 1024
+        return {'peak memory': usage.ru_maxrss * scale}
+
+def run(cmd: Command, repeat: int = 10) -> None:
     print('sampling:', end=' ')
     sys.stdout.flush()
 
     samples = []
+    memory: Dict[str, int] = {}
     for _ in range(repeat):
         start = time.time()
-        subprocess.call(cmd, stdout=devnull, stderr=devnull)
+        for name, value in run_once(cmd).items():
+            memory[name] = max(memory.get(name, 0), value)
         end = time.time()
         dt = (end - start) * 1000
         print('%dms' % int(dt), end=' ')
@@ -47,6 +86,9 @@ def run(cmd: Union[str, List[str]], repeat: int = 10) -> None:
     # more obvious if something has gone terribly wrong.
     err = sum(s - best for s in samples) / float(len(samples))
     print('estimate: %dms (mean err %.1fms)' % (best, err))
+    # Memory use barely varies between runs, so report the largest seen.
+    for name, value in memory.items():
+        print('%s: %.1f MiB' % (name, value / (1 << 20)))
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:

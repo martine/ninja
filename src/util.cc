@@ -433,6 +433,12 @@ int ReadFile(const string& path, string* contents, string* err) {
     return -ENOENT;
   }
 
+  LARGE_INTEGER size;
+  if (::GetFileSizeEx(f, &size) &&
+      static_cast<uint64_t>(size.QuadPart) <= contents->max_size()) {
+    contents->reserve(static_cast<size_t>(size.QuadPart));
+  }
+
   for (;;) {
     DWORD len;
     char buf[64 << 10];
@@ -467,8 +473,7 @@ int ReadFile(const string& path, string* contents, string* err) {
     return -errno;
   }
 
-  // +1 is for the resize in ManifestParser::Load
-  contents->reserve(st.st_size + 1);
+  contents->reserve(st.st_size);
 
   char buf[64 << 10];
   size_t len;
