@@ -134,6 +134,39 @@ foo = a$$ $
 ''',
                          self.out.getvalue())
 
+    def test_many_wrapped_lines(self) -> None:
+        self.n._line(' '.join(['word'] * 1000))
+        self.assertEqual('word $\n' + (INDENT + 'word $\n') * 998 +
+                         INDENT + 'word\n', self.out.getvalue())
+
+    def test_escaped_spaces_on_continuation_lines(self) -> None:
+        self.n = ninja_syntax.Writer(self.out, width=12)
+        self.n._line('one name$$ part$$$ word two three', indent=1)
+        self.assertEqual('''\
+  one $
+      name$$ $
+      part$$$ word $
+      two $
+      three
+''', self.out.getvalue())
+
+    def test_width_smaller_than_indent(self) -> None:
+        self.n = ninja_syntax.Writer(self.out, width=3)
+        self.n._line('one two three four', indent=2)
+        self.assertEqual('    one two three $\n        four\n',
+                         self.out.getvalue())
+
+    def test_narrow_continuation(self) -> None:
+        self.n = ninja_syntax.Writer(self.out, width=5)
+        self.n._line('ab c defg')
+        self.assertEqual('ab $\n    c $\n    defg\n', self.out.getvalue())
+
+    def test_remainder_fits_on_continuation(self) -> None:
+        self.n = ninja_syntax.Writer(self.out, width=20)
+        self.n._line('0123456789012345 abc def')
+        self.assertEqual('0123456789012345 $\n    abc def\n',
+                         self.out.getvalue())
+
 class TestEscapePath(unittest.TestCase):
     def test_space_and_colon(self) -> None:
         self.assertEqual('foo$ bar', ninja_syntax.escape_path('foo bar'))

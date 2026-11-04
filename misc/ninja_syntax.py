@@ -158,11 +158,11 @@ class Writer(object):
     def default(self, paths: Union[str, List[str]]) -> None:
         self._line('default %s' % ' '.join(escape_path(x) for x in as_list(paths)))
 
-    def _count_dollars_before_index(self, s: str, i: int) -> int:
+    def _count_dollars_before_index(self, s: str, i: int, start: int = 0) -> int:
         """Returns the number of '$' characters right in front of s[i]."""
         dollar_count = 0
         dollar_index = i - 1
-        while dollar_index > 0 and s[dollar_index] == '$':
+        while dollar_index > start and s[dollar_index] == '$':
             dollar_count += 1
             dollar_index -= 1
         return dollar_count
@@ -170,38 +170,43 @@ class Writer(object):
     def _line(self, text: str, indent: int = 0) -> None:
         """Write 'text' word-wrapped at self.width characters."""
         leading_space = '  ' * indent
-        while len(leading_space) + len(text) > self.width:
+        start = 0
+        while len(leading_space) + len(text) - start > self.width:
             # The text is too wide; wrap if possible.
 
             # Find the rightmost space that would obey our width constraint and
             # that's not an escaped space.
             available_space = self.width - len(leading_space) - len(' $')
-            space = available_space
+            # Keep the original text to avoid copying the remaining suffix on
+            # every line. Normalize negative search bounds as str.rfind does.
+            end = (start + available_space if available_space >= 0 else
+                   max(start, len(text) + available_space))
+            space = end
             while True:
-                space = text.rfind(' ', 0, space)
+                space = text.rfind(' ', start, space)
                 if (space < 0 or
-                    self._count_dollars_before_index(text, space) % 2 == 0):
+                    self._count_dollars_before_index(text, space, start) % 2 == 0):
                     break
 
             if space < 0:
                 # No such space; just use the first unescaped space we can find.
-                space = available_space - 1
+                space = end - 1
                 while True:
                     space = text.find(' ', space + 1)
                     if (space < 0 or
-                        self._count_dollars_before_index(text, space) % 2 == 0):
+                        self._count_dollars_before_index(text, space, start) % 2 == 0):
                         break
             if space < 0:
                 # Give up on breaking.
                 break
 
-            self.output.write(leading_space + text[0:space] + ' $\n')
-            text = text[space+1:]
+            self.output.write(leading_space + text[start:space] + ' $\n')
+            start = space + 1
 
             # Subsequent lines are continuations, so indent them.
             leading_space = '  ' * (indent+2)
 
-        self.output.write(leading_space + text + '\n')
+        self.output.write(leading_space + text[start:] + '\n')
 
     def close(self) -> None:
         self.output.close()
