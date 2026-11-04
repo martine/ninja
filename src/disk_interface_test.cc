@@ -278,6 +278,19 @@ TEST_F(DiskInterfaceTest, RemoveDirectory) {
   EXPECT_EQ(1, disk_.RemoveFile("does not exist"));
 }
 
+TEST_F(DiskInterfaceTest, RemoveNonEmptyDirectory) {
+  string const kPathName = "non-empty-directory/";
+  string const kFileName = kPathName + "the_file";
+  string err;
+  ASSERT_TRUE(disk_.MakeDirs(kPathName.c_str()));
+  ASSERT_TRUE(Touch(kFileName.c_str()));
+  EXPECT_EQ(0, disk_.RemoveFile(kPathName));  // Non-empty is "ignored"
+  EXPECT_EQ(0, disk_.RemoveFile(kFileName));  // Removing file passes
+  EXPECT_EQ(1, disk_.RemoveFile(kFileName));  // Removing non-existing file fails
+  EXPECT_EQ(0, disk_.RemoveFile(kPathName));  // Removing directory now passes
+  EXPECT_EQ(1, disk_.RemoveFile(kPathName));  // Removing non-existing dir fails
+}
+
 struct StatTest : public StateTestWithBuiltinRules,
                   public DiskInterface {
   StatTest() : scan_(&state_, NULL, NULL, this, NULL, NULL) {}
