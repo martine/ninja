@@ -730,6 +730,43 @@ The log file is kept in the build root in a file called `.ninja_log`.
 If you provide a variable named `builddir` in the outermost scope,
 `.ninja_log` will be kept in that directory instead.
 
+The current log format starts with the line `# ninja log v7`, followed
+by one record per output file.  Each record has five tab-separated
+fields, in this order:
+
+. Command start time, in milliseconds relative to the current build's
+  time origin.
+. Command end time, using the same millisecond time origin.
+. A timestamp used internally for filesystem comparisons.  This is not
+  the command's elapsed time or a portable wall-clock timestamp.  Its
+  representation is platform-dependent, and it is not necessarily the
+  output file's modification time: it can record the command start time,
+  or be adjusted by restat processing.
+. Output path.  A path can contain spaces; split records on tabs, not
+  whitespace.
+. A hexadecimal hash of the command.  Treat this as an opaque value used
+  by Ninja to detect command changes.
+
+The time origin resets for each invocation and can also reset when Ninja
+reloads a regenerated build file.  Start and end times are not comparable
+across these resets.
+
+For example (spacing below illustrates the tab-separated fields):
+
+----------------
+# ninja log v7
+0	12	1750000000000000000	build/output file.o	1a2b3c4d
+----------------
+
+Commands with multiple outputs produce a record for each output, with
+the same start time, end time, timestamp and command hash.  The log is
+appended to across invocations, so it can contain several records for
+the same output; the last record takes precedence.  Ninja may compact
+the log to retain only the current record for each output.
+
+The log is an internal, versioned format and may change between Ninja
+versions.
+
 
 [[ref_versioning]]
 Version compatibility
