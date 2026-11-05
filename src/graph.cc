@@ -521,10 +521,8 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   }
 
   // Finally, visit each output and update their dirty state if necessary.
-  if (dirty) {
-    for (auto o : edge->outputs_)
-      o->MarkDirty();
-  }
+  for (auto o : edge->outputs_)
+    o->set_dirty(dirty);
 
   // If an edge is dirty, its outputs are normally not ready.  (It's
   // possible to be clean but still not be ready in the presence of

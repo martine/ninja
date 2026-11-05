@@ -27,6 +27,32 @@ struct GraphTest : public StateTestWithBuiltinRules {
   DependencyScan scan_;
 };
 
+TEST_F(GraphTest, OutputCanBecomeCleanDuringRescan) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_, "build out | aux: cat in\n"));
+  fs_.Create("in", "");
+  string err;
+  Node* out = GetNode("out");
+  Node* aux = GetNode("aux");
+  ASSERT_TRUE(scan_.RecomputeDirty(out, NULL, &err));
+  ASSERT_EQ("", err);
+  ASSERT_TRUE(out->dirty());
+  ASSERT_TRUE(aux->dirty());
+
+  // A dyndep refresh can revisit an output previously considered missing.
+  // Once both outputs are newer than their input they must become clean.
+  fs_.Tick();
+  fs_.Create("out", "");
+  fs_.Create("aux", "");
+  ASSERT_TRUE(out->Stat(&fs_, &err));
+  ASSERT_TRUE(aux->Stat(&fs_, &err));
+  out->in_edge()->mark_ = Edge::VisitNone;
+  ASSERT_TRUE(scan_.RecomputeDirty(out, NULL, &err));
+  ASSERT_EQ("", err);
+  EXPECT_FALSE(out->dirty());
+  EXPECT_FALSE(aux->dirty());
+  EXPECT_TRUE(out->in_edge()->outputs_ready());
+}
+
 TEST_F(GraphTest, MissingImplicit) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "build out: cat in | implicit\n"));
