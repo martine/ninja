@@ -654,6 +654,7 @@ if gtest_src_dir:
         'elide_middle_test',
         'explanations_test',
         'graph_test',
+        'indexed_range_test',
         'jobserver_test',
         'jobserver_pool_test',
         'json_test',
