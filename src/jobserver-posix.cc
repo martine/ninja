@@ -26,12 +26,13 @@
 
 namespace {
 
-// Return true if |fd| is a fifo or character device.
+// Return true if |fd| is a fifo, character device, or socket.
 bool IsJobserverDescriptor(int fd) {
   struct stat info;
   int ret = ::fstat(fd, &info);
   return (ret == 0) && (((info.st_mode & S_IFMT) == S_IFIFO) ||
-                        ((info.st_mode & S_IFMT) == S_IFCHR));
+                        ((info.st_mode & S_IFMT) == S_IFCHR) ||
+                        ((info.st_mode & S_IFMT) == S_IFSOCK));
 }
 
 // Implementation of Jobserver::Client for Posix systems
