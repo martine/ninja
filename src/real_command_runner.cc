@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cmath>
+
 #include "build.h"
 #include "exit_status.h"
 #include "jobserver.h"
@@ -71,7 +73,11 @@ size_t RealCommandRunner::CanRunMore() const {
   }
 
   if (config_.max_load_average > 0.0f) {
-    int load_capacity = static_cast<int>(config_.max_load_average - GetLoadAverage());
+    // Round up, so that a fractional amount of headroom still lets one more
+    // job start: "-l N" should only stop new jobs once the load reaches N,
+    // not N-1.
+    int load_capacity = static_cast<int>(
+        std::ceil(config_.max_load_average - GetLoadAverage()));
     if (load_capacity < capacity)
       capacity = load_capacity;
   }
