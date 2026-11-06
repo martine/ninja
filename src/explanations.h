@@ -37,6 +37,8 @@ struct Explanations {
   /// Same as Record(), but uses a va_list to pass formatting arguments.
   void RecordArgs(const void* item, const char* fmt, va_list args);
 
+  void Remove(const void* item);
+
   /// Print recorded explanations for an edge.
   void ExplainEdge(const Edge* edge);
 
@@ -46,6 +48,13 @@ struct Explanations {
 
   /// Print explanation for loading a dyndep file.
   void ExplainDyndepLoad(const Node* node);
+
+  const std::unordered_map<const void*, std::vector<std::string>>& getMap() const {
+    return map_;
+  }
+
+  // testing only
+  void clear() { map_.clear(); }
 
  private:
   std::unordered_map<const void*, std::vector<std::string>> map_;
@@ -60,6 +69,8 @@ struct OptionalExplanations {
   void Record(const void* item, const char* fmt, ...);
 
   void RecordArgs(const void* item, const char* fmt, va_list args);
+
+  void Remove(const void* item);
 
   void LookupAndAppend(const void* item, std::vector<std::string>* out);
 

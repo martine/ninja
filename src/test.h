@@ -127,4 +127,14 @@ struct ScopedFilePath {
   bool released_ = false;
 };
 
+/// shut on '-d explain'
+struct TestExplain {
+  TestExplain();
+
+  ~TestExplain();
+};
+
+template <class T>
+struct TestEnableExplain : public TestExplain, public T {};
+
 #endif // NINJA_TEST_H_

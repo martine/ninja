@@ -112,7 +112,7 @@ struct Plan {
                                std::string* err);
   void UnmarkDependents(const Node* node, std::set<Node*>* dependents);
   bool AddSubTarget(const Node* node, const Node* dependent, std::string* err,
-                    std::set<Edge*>* dyndep_walk);
+                    std::set<Edge*>* added_edges);
 
   // Add edges that kWantToStart into the ready queue
   // Must be called after ComputeCriticalPath and before FindWork
@@ -131,6 +131,24 @@ struct Plan {
   /// The edge may be delayed from running, for example if it's a member of a
   /// currently-full pool.
   void ScheduleWork(std::map<Edge*, Want>::iterator want_e);
+
+  /// Clean the given node during the build.
+  /// Return false on error.
+  bool CleanNode(DependencyScan* scan, Node* node,
+                 std::vector<Node*>* validation_nodes,
+                 std::vector<EdgeInputsRange>* cycle_detection_nodes,
+                 std::string* err);
+
+  /// Add any validation nodes as new top level targets.
+  /// Returns false on error
+  bool AddValidationNodes(std::vector<Node*>& validation_nodes,
+                          std::string* err);
+
+  /// Add newly added input dependency to build plan. The inputs had recently
+  /// been added to the dependency graph.
+  ///
+  /// Returns false on error.
+  bool AddInputTargets(const EdgeInputsRange& new_inputs, std::string* err);
 
   /// Keep track of which edges we want to build in this plan.  If this map does
   /// not contain an entry for an edge, we do not want to build the entry or its
@@ -261,6 +279,10 @@ struct Builder {
   /// Returns ExitStatus or the exit code of the last failed job
   /// (doesn't need to be an enum value of ExitStatus)
   ExitStatus GetExitCode() const { return exit_code_; }
+
+  /// only for unittests
+  const Explanations* getExplanations() const;
+  void ClearExplanations();
 
 private:
   /// Parses the CommandCompleted result to extract dependencies.

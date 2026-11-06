@@ -30,6 +30,7 @@
 #endif
 
 #include "build_log.h"
+#include "debug_flags.h"
 #include "graph.h"
 #include "manifest_parser.h"
 #include "util.h"
@@ -266,3 +267,12 @@ ScopedFilePath::~ScopedFilePath() {
 void ScopedFilePath::Release() {
   released_ = true;
 }
+
+TestExplain::TestExplain() {
+  g_explaining = true;
+}
+
+TestExplain::~TestExplain() {
+  g_explaining = false;
+}
+

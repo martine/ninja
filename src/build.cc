@@ -21,6 +21,7 @@
 #include <stdlib.h>
 
 #include <functional>
+#include <sstream>
 #include <unordered_set>
 
 #if defined(__SVR4) && defined(__sun)
@@ -77,6 +78,116 @@ BuildResult DryRunCommandRunner::WaitForCommand() {
   return BuildResult::CommandCompleted{ edge, status };
 }
 
+// RAII helper that marks a node as "on the current path" for the lifetime
+// of the guard. The flag is cleared again on every exit from the scope, which
+// turns the node from "in progress" into "fully explored".
+class SafePathGuard {
+ public:
+  explicit SafePathGuard(bool& on_path) : on_path_(on_path) { on_path_ = true; }
+  ~SafePathGuard() { on_path_ = false; }
+
+  SafePathGuard(const SafePathGuard&) = delete;
+  SafePathGuard& operator=(const SafePathGuard&) = delete;
+
+ private:
+  bool& on_path_;
+};
+
+class CycleDetection {
+ public:
+  /// Searches the graph reachable from `input` for a cycle.
+  ///
+  /// @param input Ranges of start nodes. The search begins at every node in
+  ///              these ranges and follows each node's outgoing edges.
+  /// @return The nodes of the first cycle found, in reverse traversal order.
+  ///         Empty if the sub-graph is acyclic.
+  static std::vector<const Node*> GetCycle(
+      const std::vector<EdgeInputsRange>& input);
+
+ private:
+  explicit CycleDetection(const std::vector<EdgeInputsRange>& input)
+      : root_(input) {}
+
+  void Start();
+  void Iterate(const Node* node);
+  bool CycleFound() const;
+
+  const std::vector<EdgeInputsRange>& root_;
+
+  // State of nodes: absent = unvisited, true = on the current path,
+  // false = fully explored. Meeting a `true` node twice means a cycle.
+  // Fully explored nodes are skipped so each path is checked only once.
+  std::unordered_map<const Node*, bool> node_state_;
+  std::vector<const Node*> cycle_;
+  const Node* cycle_start_ = nullptr;
+  bool cycle_complete_ = false;
+};
+
+std::vector<const Node*> CycleDetection::GetCycle(
+    const std::vector<EdgeInputsRange>& input) {
+  CycleDetection cycle(input);
+  cycle.Start();
+  return cycle.cycle_;
+}
+
+void CycleDetection::Start() {
+  for (const auto& range : root_) {
+    for (size_t i = 0; i < range.size(); ++i) {
+      Iterate(range[i]);
+      if (CycleFound())
+        return;
+    }
+  }
+}
+
+bool CycleDetection::CycleFound() const {
+  return cycle_start_ != nullptr;
+}
+
+void CycleDetection::Iterate(const Node* node) {
+  auto iter = node_state_.try_emplace(node);
+
+  if (!iter.second) {
+    // node already exist
+
+    if (iter.first->second) {
+      // Node is already on the current path, cycle detected.
+      cycle_start_ = node;
+      cycle_.push_back(node);
+      return;
+    } else {
+      // Skip nodes already fully explored via another path. If no cycle was
+      // found before, none will be found now.
+      return;
+    }
+  }
+
+  // Mark the node as "on the path". The guard resets the flag when this
+  // function returns, marking the node as fully explored.
+  SafePathGuard path_guard(iter.first->second);
+
+  for (const Edge* edge : node->out_edges()) {
+    for (const Node* next : edge->outputs_) {
+      Iterate(next);
+      if (CycleFound()) {
+        if (cycle_complete_)
+          return; // The cycle is already complete.
+
+        if (node == cycle_start_) {
+          // Reached the node that closes the cycle.
+          cycle_complete_ = true;
+          return;
+        }
+
+        // `node` lies on the path between the cycle start and the detection
+        // point, so it belongs to the cycle.
+        cycle_.push_back(node);
+        return;
+      }
+    }
+  }
+}
+
 }  // namespace
 
 Plan::Plan(Builder* builder)
@@ -98,7 +209,7 @@ bool Plan::AddTarget(const Node* target, string* err) {
 }
 
 bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
-                        set<Edge*>* dyndep_walk) {
+                        set<Edge*>* added_edges) {
   Edge* edge = node->in_edge();
   if (!edge) {
      // Leaf node, this can be either a regular input from the manifest
@@ -125,7 +236,7 @@ bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
     want_.insert(make_pair(edge, kWantNothing));
   Want& want = want_ins.first->second;
 
-  if (dyndep_walk && want == kWantToFinish)
+  if (added_edges && want == kWantToFinish)
     return false;  // Don't need to do anything with already-scheduled edge.
 
   // If we do need to build edge and we haven't already marked it as wanted,
@@ -135,15 +246,15 @@ bool Plan::AddSubTarget(const Node* node, const Node* dependent, string* err,
     EdgeWanted(edge);
   }
 
-  if (dyndep_walk)
-    dyndep_walk->insert(edge);
+  if (added_edges)
+    added_edges->insert(edge);
 
   if (!want_ins.second)
     return true;  // We've already processed the inputs.
 
   for (vector<Node*>::iterator i = edge->inputs_.begin();
        i != edge->inputs_.end(); ++i) {
-    if (!AddSubTarget(*i, node, err, dyndep_walk) && !err->empty())
+    if (!AddSubTarget(*i, node, err, added_edges) && !err->empty())
       return false;
   }
 
@@ -266,55 +377,158 @@ bool Plan::EdgeMaybeReady(map<Edge*, Want>::iterator want_e, string* err) {
   return true;
 }
 
-bool Plan::CleanNode(DependencyScan* scan, Node* node, string* err) {
+bool Plan::CleanNode(DependencyScan* scan, Node* node,
+                     std::vector<Node*>* validation_nodes,
+                     std::vector<EdgeInputsRange>* cycle_detection_nodes,
+                     string* err) {
+  using SkipEdge = DependencyScan::SkipEdge;
+  using CleanEdge = DependencyScan::CleanEdge;
+  using DirtyEdge = DependencyScan::DirtyEdge;
+  const bool dirty_init = node->dirty();
   node->set_dirty(false);
 
-  for (vector<Edge*>::const_iterator oe = node->out_edges().begin();
-       oe != node->out_edges().end(); ++oe) {
+  // Index access used: iterators may be invalidated.
+  const size_t size = node->out_edges().size();
+  for (size_t out_index = 0; out_index < size; ++out_index) {
+    Edge* out_edge = node->out_edges()[out_index];
+
+    // explanations for nodes' outputs are obsolete
+    scan->RemoveExplanations(out_edge);
+
     // Don't process edges that we don't actually want.
-    map<Edge*, Want>::iterator want_e = want_.find(*oe);
+    map<Edge*, Want>::iterator want_e = want_.find(out_edge);
     if (want_e == want_.end() || want_e->second == kWantNothing)
       continue;
 
     // Don't attempt to clean an edge if it failed to load deps.
-    if ((*oe)->deps_missing_)
+    if (out_edge->deps_missing_)
       continue;
 
     // If all non-order-only inputs for this edge are now clean,
     // we might have changed the dirty state of the outputs.
     vector<Node*>::iterator
-        begin = (*oe)->inputs_.begin(),
-        end = (*oe)->inputs_.end() - (*oe)->order_only_deps_;
-    if (find_if(begin, end, mem_fn(&Node::dirty)) == end) {
+        begin = out_edge->inputs_.begin(),
+        end = out_edge->inputs_.end() - out_edge->order_only_deps_;
+    if (none_of(begin, end, [](const Node* i) { return i->dirty(); })) {
       // Recompute most_recent_input.
-      Node* most_recent_input = NULL;
+      const Node* most_recent_input = nullptr;
       for (vector<Node*>::iterator i = begin; i != end; ++i) {
         if (!most_recent_input || (*i)->mtime() > most_recent_input->mtime())
           most_recent_input = *i;
       }
 
-      // Now, this edge is dirty if any of the outputs are dirty.
-      // If the edge isn't dirty, clean the outputs and mark the edge as not
-      // wanted.
-      bool outputs_dirty = false;
-      if (!scan->RecomputeOutputsDirty(*oe, most_recent_input,
-                                       &outputs_dirty, err)) {
+      auto dirty_state = scan->RecomputeDirtyRestatInput(
+          out_edge, most_recent_input, validation_nodes, cycle_detection_nodes,
+          err);
+      if (!dirty_state)
         return false;
-      }
-      if (!outputs_dirty) {
-        for (vector<Node*>::iterator o = (*oe)->outputs_.begin();
-             o != (*oe)->outputs_.end(); ++o) {
-          if (!CleanNode(scan, *o, err))
+
+      // Failed to load dependency info
+      // Don't attempt to clean an edge if it failed to load deps.
+      if (std::holds_alternative<SkipEdge>(*dirty_state))
+        continue;
+
+      // Now, this edge is dirty if any of the outputs or newly added inputs are
+      // dirty. If the edge isn't dirty, clean the outputs and mark the edge as
+      // not wanted.
+      if (std::holds_alternative<CleanEdge>(*dirty_state)) {
+        // remove 'out_edge' and its input edges from build plan
+
+        for (auto o : out_edge->outputs_) {
+          if (!CleanNode(scan, o, validation_nodes, cycle_detection_nodes, err))
             return false;
         }
 
         want_e->second = kWantNothing;
         --wanted_edges_;
-        if (!(*oe)->is_phony()) {
+        if (!out_edge->is_phony()) {
           --command_edges_;
           if (builder_)
-            builder_->status_->EdgeRemovedFromPlan(*oe);
+            builder_->status_->EdgeRemovedFromPlan(out_edge);
         }
+      } else {
+        assert(std::holds_alternative<DirtyEdge>(*dirty_state));
+
+        // 'out_edge' is not removed, preserve dirty state of node
+        node->set_dirty(dirty_init);
+
+        // add newly added input edges of 'out_egde' to build-plan.
+        const EdgeInputsRange& new_deps =
+            std::get<DirtyEdge>(*dirty_state).edge_inputs_range_;
+        if (!AddInputTargets(new_deps, err))
+          return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool Plan::AddInputTargets(const EdgeInputsRange& new_inputs,
+                           std::string* err) {
+  std::set<Edge*> inputs_walk;
+  for (size_t i = 0; i < new_inputs.size(); ++i) {
+    if (!AddSubTarget(new_inputs[i], nullptr, err, &inputs_walk) &&
+        !err->empty())
+      return false;
+  }
+
+  // See if any encountered edges are now ready.
+  for (auto dep : inputs_walk) {
+    map<Edge*, Want>::iterator want_e = want_.find(dep);
+    if (want_e == want_.end())
+      continue;
+    if (!EdgeMaybeReady(want_e, err))
+      return false;
+  }
+  return true;
+}
+
+bool Plan::CleanNode(DependencyScan* scan, Node* node, string* err) {
+  std::vector<Node*> validation_nodes;
+  std::vector<EdgeInputsRange> cycle_detection_nodes;
+  if (!CleanNode(scan, node, &validation_nodes, &cycle_detection_nodes, err))
+    return false;
+
+  // check for a cycle.
+  const std::vector<const Node*> cycle =
+      CycleDetection::GetCycle(cycle_detection_nodes);
+  if (!cycle.empty()) {
+    // cycle detected
+
+    std::string_view output_node = [node]() -> std::string_view {
+      if (!node->out_edges().empty() &&
+          !node->out_edges().front()->outputs_.empty())
+        return node->out_edges().front()->outputs_.front()->path();
+      else
+        return "internal error";  // should never apply
+    }();
+
+    // prepare error message
+    std::stringstream err_stream(*err);
+    err_stream << "dependency cycle: ";
+
+    for (auto it = cycle.begin(); it != cycle.end(); ++it) {
+      err_stream << "'" << (*it)->path() << "' -> ";
+    }
+    err_stream << "'" << cycle.front()->path() << "'"
+               << "\nDetected after loading depfile for output '" << output_node
+               << "' due to restat input '" << node->path() << "'";
+
+    *err = err_stream.str();
+
+    return false;
+  }
+
+  // Add any validation nodes as new top level targets.
+  return AddValidationNodes(validation_nodes, err);
+}
+
+bool Plan::AddValidationNodes(std::vector<Node*>& validation_nodes,
+                              std::string* err) {
+  for (auto v : validation_nodes) {
+    if (Edge* in_edge = v->in_edge()) {
+      if (!in_edge->outputs_ready() && !AddTarget(v, err)) {
+        return false;
       }
     }
   }
@@ -419,15 +633,9 @@ bool Plan::RefreshDyndepDependents(DependencyScan* scan,
 
     // Add any validation nodes found during RecomputeDirty as new top level
     // targets.
-    for (std::vector<Node*>::iterator v = validation_nodes.begin();
-         v != validation_nodes.end(); ++v) {
-      if (Edge* in_edge = (*v)->in_edge()) {
-        if (!in_edge->outputs_ready() &&
-            !AddTarget(*v, err)) {
-          return false;
-        }
-      }
-    }
+    if (!AddValidationNodes(validation_nodes, err))
+      return false;
+
     if (!n->dirty())
       continue;
 
@@ -960,18 +1168,20 @@ bool Builder::FinishCommand(BuildResult::CommandCompleted& result,
     // we should fall back to recording the outputs' current mtime in the
     // log.
     if (record_mtime == 0 || restat || generator) {
-      for (vector<Node*>::iterator o = edge->outputs_.begin();
-           o != edge->outputs_.end(); ++o) {
-        TimeStamp new_mtime = disk_interface_->Stat((*o)->path(), err);
+      // Index access used: iterators may be invalidated.
+      const size_t size = edge->outputs_.size();
+      for (size_t i = 0; i < size; ++i) {
+        TimeStamp new_mtime =
+            disk_interface_->Stat(edge->outputs_[i]->path(), err);
         if (new_mtime == -1)
           return false;
         if (new_mtime > record_mtime)
           record_mtime = new_mtime;
-        if ((*o)->mtime() == new_mtime && restat) {
+        if (edge->outputs_[i]->mtime() == new_mtime && restat) {
           // The rule command did not change the output.  Propagate the clean
           // state through the build graph.
           // Note that this also applies to nonexistent outputs (mtime == 0).
-          if (!plan_.CleanNode(&scan_, *o, err))
+          if (!plan_.CleanNode(&scan_, edge->outputs_[i], err))
             return false;
           node_cleaned = true;
         }
@@ -1119,4 +1329,13 @@ void Builder::SetFailureCode(ExitStatus code) {
   if (code != ExitSuccess) {
     exit_code_ = code;
   }
+}
+
+const Explanations* Builder::getExplanations() const {
+  return explanations_.get();
+}
+
+void Builder::ClearExplanations() {
+  if (explanations_)
+    explanations_->clear();
 }

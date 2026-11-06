@@ -57,6 +57,10 @@ void Explanations::RecordArgs(const void* item, const char* fmt, va_list args) {
   }
 }
 
+void Explanations::Remove(const void* item) {
+  map_.erase(item);
+}
+
 void Explanations::ExplainEdge(const Edge* edge) {
   // Collect all explanations for the current edge's outputs.
   std::vector<std::string> explanations;
@@ -113,6 +117,12 @@ void OptionalExplanations::RecordArgs(const void* item, const char* fmt,
                                       va_list args) {
   if (explanations_) {
     explanations_->RecordArgs(item, fmt, args);
+  }
+}
+
+void OptionalExplanations::Remove(const void* item) {
+  if (explanations_) {
+    explanations_->Remove(item);
   }
 }
 

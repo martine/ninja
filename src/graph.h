@@ -20,6 +20,7 @@
 #include <queue>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "dyndep.h"
@@ -233,6 +234,7 @@ struct Edge {
   VisitMark mark_ = VisitNone;
   bool outputs_ready_ = false;
   bool deps_loaded_ = false;
+  bool deps_added_to_graph = false;
   bool deps_missing_ = false;
   bool generated_by_dep_loader_ = false;
   TimeStamp command_start_time_ = 0;
@@ -348,29 +350,52 @@ struct ImplicitDepLoader {
 ///
 /// A default-constructed `EdgeInputsRange` spans the entire
 /// `edge->inputs_` vector.
+///
+/// Memory safety
+/// beg_/end_ are index offsets, not iterators. Access
+/// always goes through index edge_->inputs_[...].
+/// The range stays valid even if edge_->inputs_ reallocates later
+/// (e.g. via dyndep loading)
+///   ***********************************************
+///   /* undefined behavior on realloc for edge->inputs_ in foo. */
+///   for (Node* i : edge->inputs_) foo(i);
+///   /* works fine even on realloc for edge->inputs_ in foo. */
+///   EdgeInputsRange range(edge);
+///   for (size_t i = 0; i < range.size(); ++i) foo(range[i]);
+///   ***********************************************
+/// Appending inputs to edge is safe, if new elements are guaranteed to be
+/// appended after end_.
+/// This matches for ranges that exclude order-only inputs (depfile-loaded
+/// inputs are implicit), where dyndep then appends further implicit inputs.
 struct EdgeInputsRange {
   using const_iterator = std::vector<Node*>::const_iterator;
 
   /// Create new instance covering all |edge| inputs.
-  EdgeInputsRange(Edge* edge)
-      : edge_(edge), beg_(edge->inputs_.begin()), end_(edge->inputs_.end()) {}
+  explicit EdgeInputsRange(Edge* edge)
+      : edge_(edge), beg_(0), end_(edge->inputs_.size()),
+        size_(edge->inputs_.size()) {}
 
   EdgeInputsRange(Edge* edge, const_iterator beg, const_iterator end)
-      : edge_(edge), beg_(beg), end_(end) {}
+      : edge_(edge), beg_(beg - edge->inputs_.begin()),
+        end_(end - edge->inputs_.begin()), size_(end_ - beg_) {}
 
   static EdgeInputsRange Empty(Edge* edge) {
     return EdgeInputsRange(edge, edge->inputs_.begin(), edge->inputs_.begin());
   }
 
-  const_iterator begin() const { return beg_; }
-  const_iterator end() const { return end_; }
+  Node* operator[](size_t i) const { return edge_->inputs_[beg_ + i]; }
+  size_t size() const { return size_; }
 
-  /// The edge whose input range is being viewed.
-  Edge* const edge_;
+  Edge* GetEdge() const { return edge_; }
+  bool empty() const { return beg_ == end_; }
 
  private:
-  const_iterator beg_;
-  const_iterator end_;
+  /// The edge whose input range is being viewed.
+  Edge* edge_;
+
+  size_t beg_;
+  size_t end_;
+  size_t size_;
 };
 
 /// DependencyScan manages the process of scanning the files in a graph
@@ -396,9 +421,34 @@ struct DependencyScan {
   bool RecomputeDirty(Node* node, std::vector<Node*>* validation_nodes, std::string* err);
 
   /// Recompute whether any output of the edge is dirty, if so sets |*dirty|.
-  /// Returns false on failure.
-  bool RecomputeOutputsDirty(Edge* edge, Node* most_recent_input,
-                             bool* dirty, std::string* err);
+  /// Returns true if edge is dirty.
+  bool RecomputeOutputsDirty(const Edge* edge, const Node* most_recent_input,
+                             std::string* err);
+
+  struct SkipEdge {};
+  struct CleanEdge {};
+  struct DirtyEdge {
+    EdgeInputsRange edge_inputs_range_;
+    static DirtyEdge Empty(Edge* edge) {
+      return DirtyEdge{ EdgeInputsRange::Empty(edge) };
+    }
+  };
+
+  /// Recalculate the dirty state of \a edge, under restat conditions and if all
+  /// edges's inputs are clean.
+  /// This may include loading a depfile. Only non-stale depfiles are loaded.
+  /// Returns std::nullopt on error, \a err contains more information and is
+  /// never empty.
+  /// Otherwise it can return one of three states:
+  ///   - Edge is dirty. This may include newly loaded dependencies
+  ///     (from the depfile), which are returned as well.
+  ///   - Edge is clean, and will be removed from the build plan.
+  ///   - Edge is skipped and not changed, as its depfile could not be loaded.
+  std::optional<std::variant<DirtyEdge, CleanEdge, SkipEdge>>
+  RecomputeDirtyRestatInput(Edge* edge, const Node* most_recent_input,
+                            std::vector<Node*>* validation_nodes,
+                            std::vector<EdgeInputsRange>* cycle_detection_nodes,
+                            std::string* err);
 
   BuildLog* build_log() const {
     return build_log_;
@@ -418,12 +468,14 @@ struct DependencyScan {
   bool LoadDyndeps(Node* node, std::string* err) const;
   bool LoadDyndeps(Node* node, DyndepFile* ddf, std::string* err) const;
 
+  void RemoveExplanations(Edge* edge);
+
  private:
   bool RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
                           std::vector<Node*>* validation_nodes,
                           std::string* err);
   bool RecomputeEdgesInputsDirty(const Node* node, EdgeInputsRange input_range,
-                                 Node*& most_recent_input, bool& dirty,
+                                 const Node*& most_recent_input, bool& dirty,
                                  std::vector<Node*>* stack,
                                  std::vector<Node*>* validation_nodes,
                                  std::string* err);

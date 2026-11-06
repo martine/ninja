@@ -96,7 +96,8 @@ class RecomputeOutputsDirtyCache {
 
  public:
   RecomputeOutputsDirtyCache(BuildLog* build_log,
-                             OptionalExplanations& explanations, Edge* edge)
+                             OptionalExplanations& explanations,
+                             const Edge* edge)
       : buildLog_(build_log), explanations_(explanations), edge_(edge),
         logEntry_(edge->outputs_.size()) {}
 
@@ -356,35 +357,35 @@ bool DependencyScan::RecomputeDirty(Node* initial_node,
 /// @param dirty        Set to true if any regular input is dirty or missing.
 /// @return true on success, false if an error occurred during recomputation.
 bool DependencyScan::RecomputeEdgesInputsDirty(
-    const Node* node, EdgeInputsRange input_range, Node*& most_recent_input,
+    const Node* node, EdgeInputsRange input_range, const Node*& most_recent_input,
     bool& dirty, std::vector<Node*>* stack,
     std::vector<Node*>* validation_nodes, std::string* err) {
-  const auto& edge = input_range.edge_;
+  Edge* edge = input_range.GetEdge();
 
   // Visit all specified inputs before checking if any of them is ready.
   // Newly encountered edges may load dyndep files and gain
   // outputs that correspond to some of our inputs.
-  for (auto i : input_range) {
-    if (!RecomputeNodeDirty(i, stack, validation_nodes, err))
+  for (size_t i = 0; i < input_range.size(); ++i) {
+    if (!RecomputeNodeDirty(input_range[i], stack, validation_nodes, err))
       return false;
   }
 
-  for (auto i = input_range.begin(); i != input_range.end(); ++i) {
+  for (size_t i = 0; i < input_range.size(); ++i) {
     // If an input is not ready, neither are our outputs.
-    if (Edge* in_edge = (*i)->in_edge()) {
+    if (Edge* in_edge = input_range[i]->in_edge()) {
       if (!in_edge->outputs_ready_)
         edge->outputs_ready_ = false;
     }
 
-    if (!edge->is_order_only(i - edge->inputs_.cbegin())) {
+    if (!edge->is_order_only(i)) {
       // If a regular input is dirty (or missing), we're dirty.
       // Otherwise consider mtime.
-      if ((*i)->dirty()) {
-        explanations_.Record(node, "%s is dirty", (*i)->path().c_str());
+      if (input_range[i]->dirty()) {
+        explanations_.Record(node, "%s is dirty", input_range[i]->path().c_str());
         dirty = true;
       } else {
-        if (!most_recent_input || (*i)->mtime() > most_recent_input->mtime()) {
-          most_recent_input = *i;
+        if (!most_recent_input || input_range[i]->mtime() > most_recent_input->mtime()) {
+          most_recent_input = input_range[i];
         }
       }
     }
@@ -473,7 +474,7 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
     }
   }
 
-  Node* most_recent_input = nullptr;
+  const Node* most_recent_input = nullptr;
   if (!RecomputeEdgesInputsDirty(node, EdgeInputsRange(node->in_edge()),
                                  most_recent_input, dirty, stack,
                                  validation_nodes, err))
@@ -489,8 +490,13 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   if (!edge_deps_loaded) {
     // only try to load the deps log if no rebuild is necessary
     // if an rebuild is necessary the deps log is outdated for this target
+    //
+    // For restat edges, the edge may finish without changing its outputs.
+    // In that case, Plan::CleanNode() rechecks whether the deps log is stale
+    // and may load it if the edge is clean.
     if (!dirty) {
       // Load discovered deps.
+      edge->deps_added_to_graph = true;
       std::optional<EdgeInputsRange> new_deps = dep_loader_.LoadDeps(edge, err);
       if (!new_deps) {
         if (!err->empty())
@@ -543,6 +549,11 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   return true;
 }
 
+void DependencyScan::RemoveExplanations(Edge* edge) {
+  for (Node* i : edge->outputs_)
+    explanations_.Remove(i);
+}
+
 bool DependencyScan::VerifyDAG(Node* node, vector<Node*>* stack, string* err) {
   Edge* edge = node->in_edge();
   assert(edge != NULL);
@@ -582,11 +593,11 @@ bool DependencyScan::VerifyDAG(Node* node, vector<Node*>* stack, string* err) {
   return false;
 }
 
-bool DependencyScan::RecomputeOutputsDirty(Edge* edge, Node* most_recent_input,
-                                           bool* outputs_dirty, string* err) {
-  *outputs_dirty = RecomputeOutputsDirtyCache(build_log(), explanations_, edge)
-                       .all(most_recent_input);
-  return true;
+bool DependencyScan::RecomputeOutputsDirty(const Edge* edge,
+                                           const Node* most_recent_input,
+                                           string* err) {
+  return RecomputeOutputsDirtyCache(build_log(), explanations_, edge)
+      .all(most_recent_input);
 }
 
 bool DependencyScan::LoadDyndeps(Node* node, string* err) const {
@@ -596,6 +607,73 @@ bool DependencyScan::LoadDyndeps(Node* node, string* err) const {
 bool DependencyScan::LoadDyndeps(Node* node, DyndepFile* ddf,
                                  string* err) const {
   return dyndep_loader_.LoadDyndeps(node, ddf, err);
+}
+
+std::optional<std::variant<DependencyScan::DirtyEdge, DependencyScan::CleanEdge,
+                           DependencyScan::SkipEdge>>
+DependencyScan::RecomputeDirtyRestatInput(Edge* edge,
+                                          const Node* most_recent_input,
+                                          std::vector<Node*>* validation_nodes,
+                                          std::vector<EdgeInputsRange>* cycle_detection_nodes,
+                                          std::string* err) {
+  RecomputeOutputsDirtyCache recomputeOutputsDirty(build_log(), explanations_,
+                                                   edge);
+  bool dirty = recomputeOutputsDirty.all(most_recent_input);
+  if (dirty)
+    return DirtyEdge::Empty(edge);
+
+  if (edge->deps_added_to_graph)
+    return DependencyScan::CleanEdge();
+
+  // This depfile was not loaded because the edge was initially dirty
+  // based on its manifest inputs. Since the restat inputs completed
+  // without changing their outputs, the edge may now be clean, so the
+  // depfile can be loaded safely.
+  edge->deps_added_to_graph = true;
+  std::optional<EdgeInputsRange> new_deps = dep_loader_.LoadDeps(edge, err);
+  if (!new_deps) {
+    if (!err->empty())
+      return std::nullopt;
+
+    // Failed to load dependency info
+    // Don't attempt to clean an edge if it failed to load deps.
+    edge->deps_missing_ = true;
+    return SkipEdge();
+  }
+
+// Updates the dirty state of the edge and its transitive dependencies
+// using the dependencies loaded from the depfile.
+//
+// Internally calls RecomputeNodeDirty for each dependency, cycle detection
+// is performed as part of that call.
+//
+// Limitation: cycle detection only works reliably if all edges of the
+// cycle are among the newly added (depfile) dependencies. Cycles that
+// include edges already present in the previously parsed build graph
+// are NOT detected here.
+  std::vector<Node*> stack;
+  const Node* most_recent_input_previous = most_recent_input;
+  if (!RecomputeEdgesInputsDirty(edge->outputs_[0], *new_deps,
+                                 most_recent_input, dirty, &stack,
+                                 validation_nodes, err))
+    return std::nullopt;
+
+  // collect all newly loaded depfile
+  if (!new_deps->empty())
+    cycle_detection_nodes->push_back(*new_deps);
+
+  if (dirty)
+    return DirtyEdge{ *new_deps };
+
+  // only applicable if most_recent_input did change, any other criteria
+  // has already been checked.
+  if (most_recent_input_previous != most_recent_input)
+    dirty = recomputeOutputsDirty.depfile(most_recent_input);
+
+  if (!dirty)
+    return CleanEdge();
+
+  return DirtyEdge{ *new_deps };
 }
 
 bool Edge::AllInputsReady() const {
