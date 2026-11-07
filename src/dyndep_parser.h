@@ -16,6 +16,7 @@
 #define NINJA_DYNDEP_PARSER_H_
 
 #include "eval_env.h"
+#include "file_scope.h"
 #include "parser.h"
 
 struct DyndepFile;
@@ -41,7 +42,7 @@ private:
   bool ParseEdge(std::string* err);
 
   DyndepFile* dyndep_file_;
-  BindingEnv env_;
+  FileScope scope_;
 };
 
 #endif  // NINJA_DYNDEP_PARSER_H_

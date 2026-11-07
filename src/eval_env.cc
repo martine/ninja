@@ -12,45 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <assert.h>
-
 #include "eval_env.h"
 
 using namespace std;
-
-std::string BindingEnv::LookupVariable(StringPiece var) {
-  const auto i = bindings_.find(var);
-  if (i != bindings_.end())
-    return i->second;
-  if (parent_)
-    return parent_->LookupVariable(var);
-  return "";
-}
-
-void BindingEnv::AddBinding(const std::string& key, StringPiece val) {
-  bindings_[key].assign(val.begin(), val.end());
-}
-
-void BindingEnv::AddRule(std::unique_ptr<const Rule> rule) {
-  assert(LookupRuleCurrentScope(rule->name()) == NULL);
-  rules_[rule->name()] = std::move(rule);
-}
-
-const Rule* BindingEnv::LookupRuleCurrentScope(StringPiece rule_name) {
-  auto i = rules_.find(rule_name);
-  if (i == rules_.end())
-    return NULL;
-  return i->second.get();
-}
-
-const Rule* BindingEnv::LookupRule(StringPiece rule_name) {
-  auto i = rules_.find(rule_name);
-  if (i != rules_.end())
-    return i->second.get();
-  if (parent_)
-    return parent_->LookupRule(rule_name);
-  return NULL;
-}
 
 void Rule::AddBinding(const string& key, const EvalString& val) {
   bindings_[key] = val;
@@ -86,41 +50,6 @@ bool Rule::IsReservedBinding(StringPiece var) {
       var == "rspfile" ||
       var == "rspfile_content" ||
       var == "msvc_deps_prefix";
-}
-
-const map<string, std::unique_ptr<const Rule>, StringPieceLess>& BindingEnv::GetRules() const {
-  return rules_;
-}
-
-std::string BindingEnv::LookupWithFallback(StringPiece var,
-                                           const EvalString* eval,
-                                           Env* env) {
-  const auto i = bindings_.find(var);
-  if (i != bindings_.end())
-    return i->second;
-
-  if (eval)
-    return eval->Evaluate(env);
-
-  if (parent_)
-    return parent_->LookupVariable(var);
-
-  return "";
-}
-
-string EvalString::Evaluate(Env* env) const {
-  if (parsed_.empty()) {
-    return single_token_;
-  }
-
-  string result;
-  for (TokenList::const_iterator i = parsed_.begin(); i != parsed_.end(); ++i) {
-    if (i->second == RAW)
-      result.append(i->first);
-    else
-      result.append(env->LookupVariable(i->first));
-  }
-  return result;
 }
 
 void EvalString::AddText(StringPiece text) {

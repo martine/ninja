@@ -870,6 +870,29 @@ TEST_F(GraphTest, DyndepLoadMultiple) {
   EXPECT_EQ(edge2, in2imp->out_edges()[0]);
 }
 
+TEST_F(GraphTest, DyndepRestatWithRuleBinding) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule r\n"
+                                      "  command = unused\n"
+                                      "  dyndep = dd\n"
+                                      "  restat =\n"
+                                      "build out1: r in || dd\n"
+                                      "build out2: r in || dd\n"
+                                      "build unrelated: cat in\n"));
+  fs_.Create("dd",
+             "ninja_dyndep_version = 1\n"
+             "build out1: dyndep\n"
+             "  restat = 1\n"
+             "build out2: dyndep\n");
+
+  std::string err;
+  ASSERT_TRUE(scan_.LoadDyndeps(GetNode("dd"), &err));
+  EXPECT_EQ("", err);
+  EXPECT_TRUE(GetNode("out1")->in_edge()->GetBindingBool("restat"));
+  EXPECT_FALSE(GetNode("out2")->in_edge()->GetBindingBool("restat"));
+  EXPECT_FALSE(GetNode("unrelated")->in_edge()->GetBindingBool("restat"));
+}
+
 TEST_F(GraphTest, DyndepFileMissing) {
   AssertParse(&state_,
 "rule r\n"

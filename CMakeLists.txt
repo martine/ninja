@@ -133,10 +133,12 @@ add_library(libninja OBJECT
   src/debug_flags.cc
   src/deps_log.cc
   src/disk_interface.cc
+  src/edge_bindings.cc
   src/edit_distance.cc
   src/elide_middle.cc
   src/eval_env.cc
   src/explanations.cc
+  src/file_scope.cc
   src/graph.cc
   src/graphviz.cc
   src/jobserver.cc
@@ -289,6 +291,7 @@ if(BUILD_TESTING)
     src/manifest_parser_test.cc
     src/missing_deps_test.cc
     src/ninja_test.cc
+    src/pointer_variant_test.cc
     src/state_test.cc
     src/string_piece_test.cc
     src/string_piece_util_test.cc

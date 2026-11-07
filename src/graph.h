@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "dyndep.h"
+#include "edge_bindings.h"
 #include "eval_env.h"
 #include "explanations.h"
 #include "jobserver.h"
@@ -185,7 +186,8 @@ struct Edge {
     VisitDone
   };
 
-  Edge() = default;
+  /// Create an edge declared in the given enclosing scope.
+  explicit Edge(FileScope* scope) : bindings_(scope) {}
 
   /// Return true if all inputs' in-edges are ready.
   bool AllInputsReady() const;
@@ -223,7 +225,8 @@ struct Edge {
   std::vector<Node*> outputs_;
   std::vector<Node*> validations_;
   Node* dyndep_ = nullptr;
-  BindingEnv* env_ = nullptr;
+  /// Variables set on this edge, and the scope of the file it is in.
+  EdgeBindings bindings_;
   size_t id_ = 0;
   int64_t critical_path_weight_ = -1;
 

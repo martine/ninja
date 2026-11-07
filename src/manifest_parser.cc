@@ -22,6 +22,8 @@
 #include <memory>
 #include <vector>
 
+#include "edge_bindings.h"
+#include "file_scope.h"
 #include "graph.h"
 #include "state.h"
 #include "util.h"
@@ -29,15 +31,36 @@
 
 using namespace std;
 
+namespace {
+
+/// The scope for evaluating a build statement's paths: the variables set in
+/// its build block, then the scope of the file it is in.  Unlike EdgeScope,
+/// $in, $out and the rule's variables are not visible.
+struct EdgePathScope {
+  explicit EdgePathScope(const EdgeBindings& bindings)
+      : bindings_(bindings) {}
+
+  std::string LookupVariable(StringPiece var) const {
+    if (std::optional<StringPiece> value = bindings_.FindBinding(var))
+      return value->AsString();
+    return bindings_.parent().LookupVariable(var);
+  }
+
+ private:
+  const EdgeBindings& bindings_;
+};
+
+}  // anonymous namespace
+
 ManifestParser::ManifestParser(State* state, FileReader* file_reader,
                                ManifestParserOptions options)
     : Parser(state, file_reader),
       options_(options), quiet_(false) {
-  env_ = &state->bindings_;
+  scope_ = &state->bindings_;
 }
 
 std::string ManifestParser::LookupVariable(const std::string& varname) {
-  return env_->LookupVariable(varname);
+  return scope_->LookupVariable(varname);
 }
 
 bool ManifestParser::Parse(const string& filename, const string& input,
@@ -69,12 +92,12 @@ bool ManifestParser::Parse(const string& filename, const string& input,
       EvalString let_value;
       if (!ParseLet(&name, &let_value, err))
         return false;
-      string value = let_value.Evaluate(env_);
+      string value = let_value.Evaluate(scope_);
       // Check ninja_required_version immediately so we can exit
       // before encountering any syntactic surprises.
       if (name == "ninja_required_version")
         CheckNinjaVersion(value, &lexer_.manifest_version_major, &lexer_.manifest_version_minor);
-      env_->AddBinding(name, value);
+      scope_->AddBinding(name, value);
       break;
     }
     case Lexer::INCLUDE:
@@ -121,7 +144,7 @@ bool ManifestParser::ParsePool(string* err) {
       return false;
 
     if (key == "depth") {
-      string depth_string = value.Evaluate(env_);
+      string depth_string = value.Evaluate(scope_);
       const char* begin = depth_string.data();
       const char* end = begin + depth_string.size();
       auto result = std::from_chars(begin, end, depth);
@@ -149,7 +172,7 @@ bool ManifestParser::ParseRule(string* err) {
   if (!ExpectToken(Lexer::NEWLINE, err))
     return false;
 
-  if (env_->LookupRuleCurrentScope(name) != NULL)
+  if (scope_->LookupRuleCurrentScope(name) != NULL)
     return lexer_.Error("duplicate rule '" + name + "'", err);
 
   auto rule = std::unique_ptr<Rule>(new Rule(name));
@@ -178,7 +201,7 @@ bool ManifestParser::ParseRule(string* err) {
   if (rule->bindings_["command"].empty())
     return lexer_.Error("expected 'command =' line", err);
 
-  env_->AddRule(std::move(rule));
+  scope_->AddRule(std::move(rule));
   return true;
 }
 
@@ -200,7 +223,7 @@ bool ManifestParser::ParseDefault(string* err) {
     return lexer_.Error("expected target name", err);
 
   do {
-    string path = eval.Evaluate(env_);
+    string path = eval.Evaluate(scope_);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;  // Unused because this only does lookup.
@@ -259,7 +282,7 @@ bool ManifestParser::ParseEdge(string* err) {
   if (!lexer_.ReadIdent(&rule_name))
     return lexer_.Error("expected build command name", err);
 
-  const Rule* rule = env_->LookupRule(rule_name);
+  const Rule* rule = scope_->LookupRule(rule_name);
   if (!rule)
     return lexer_.Error("unknown build rule '" + rule_name + "'", err);
 
@@ -316,21 +339,17 @@ bool ManifestParser::ParseEdge(string* err) {
   if (!ExpectToken(Lexer::NEWLINE, err))
     return false;
 
-  // Bindings on edges are rare, so allocate per-edge envs only when needed.
-  bool has_indent_token = lexer_.PeekToken(Lexer::INDENT);
-  BindingEnv* env = has_indent_token ? new BindingEnv(env_) : env_;
-  while (has_indent_token) {
+  Edge* edge = state_->AddEdge(rule, scope_);
+  // Edge bindings are evaluated in the enclosing scope, not the edge's.
+  while (lexer_.PeekToken(Lexer::INDENT)) {
     string key;
     EvalString val;
     if (!ParseLet(&key, &val, err))
       return false;
 
-    env->AddBinding(key, val.Evaluate(env_));
-    has_indent_token = lexer_.PeekToken(Lexer::INDENT);
+    edge->bindings_.AddBinding(key, val.Evaluate(scope_));
   }
-
-  Edge* edge = state_->AddEdge(rule);
-  edge->env_ = env;
+  const EdgePathScope path_scope(edge->bindings_);
 
   string pool_name = edge->GetBinding("pool");
   if (!pool_name.empty()) {
@@ -342,7 +361,7 @@ bool ManifestParser::ParseEdge(string* err) {
 
   edge->outputs_.reserve(outs_.size());
   for (size_t i = 0, e = outs_.size(); i != e; ++i) {
-    string path = outs_[i].Evaluate(env);
+    string path = outs_[i].Evaluate(&path_scope);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
@@ -364,7 +383,7 @@ bool ManifestParser::ParseEdge(string* err) {
 
   edge->inputs_.reserve(ins_.size());
   for (vector<EvalString>::iterator i = ins_.begin(); i != ins_.end(); ++i) {
-    string path = i->Evaluate(env);
+    string path = i->Evaluate(&path_scope);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
@@ -377,7 +396,7 @@ bool ManifestParser::ParseEdge(string* err) {
   edge->validations_.reserve(validations_.size());
   for (std::vector<EvalString>::iterator v = validations_.begin();
       v != validations_.end(); ++v) {
-    string path = v->Evaluate(env);
+    string path = v->Evaluate(&path_scope);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
@@ -429,15 +448,15 @@ bool ManifestParser::ParseFileInclude(bool new_scope, string* err) {
   EvalString eval;
   if (!lexer_.ReadPath(&eval, err))
     return false;
-  string path = eval.Evaluate(env_);
+  string path = eval.Evaluate(scope_);
 
   if (subparser_ == nullptr) {
     subparser_.reset(new ManifestParser(state_, file_reader_, options_));
   }
   if (new_scope) {
-    subparser_->env_ = new BindingEnv(env_);
+    subparser_->scope_ = new FileScope(scope_);
   } else {
-    subparser_->env_ = env_;
+    subparser_->scope_ = scope_;
   }
 
   if (!subparser_->Load(path, err, &lexer_))

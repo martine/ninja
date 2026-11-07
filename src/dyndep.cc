@@ -81,10 +81,8 @@ bool DyndepLoader::LoadDyndeps(Node* node, DyndepFile* ddf,
 bool DyndepLoader::UpdateEdge(Edge* edge, Dyndeps const* dyndeps,
                               std::string* err) const {
   // Add dyndep-discovered bindings to the edge.
-  // We know the edge already has its own binding
-  // scope because it has a "dyndep" binding.
   if (dyndeps->restat_)
-    edge->env_->AddBinding("restat", "1");
+    edge->bindings_.AddBinding("restat", "1");
 
   // Add the dyndep-discovered outputs to the edge.
   edge->outputs_.insert(edge->outputs_.end(),

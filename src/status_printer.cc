@@ -40,15 +40,15 @@
 using namespace std;
 
 namespace {
-/// Env that resolves variables in a `--status` format string by asking
+/// Scope that resolves variables in a `--status` format string by asking
 /// the StatusPrinter for their current value. `$description` is handled
 /// here because its value is per-edge state passed in at print time.
-struct StatusFormatEnv : public Env {
+struct StatusFormatScope {
   const StatusPrinter* printer;
   const string& description;
-  StatusFormatEnv(const StatusPrinter* p, const string& d)
+  StatusFormatScope(const StatusPrinter* p, const string& d)
       : printer(p), description(d) {}
-  string LookupVariable(StringPiece var) override {
+  string LookupVariable(StringPiece var) {
     if (var == "description")
       return description;
     return printer->FormatStatusVariable(var);
@@ -533,7 +533,7 @@ void StatusPrinter::PrintStatus(const Edge* edge, int64_t time_millis) {
     // `$description` in the format string. In verbose mode (or when the
     // description is empty) `$description` resolves to the command, matching
     // the NINJA_STATUS / default behaviour.
-    StatusFormatEnv env(this, description);
+    StatusFormatScope env(this, description);
     to_print = status_eval_->Evaluate(&env);
   } else {
     to_print = FormatProgressStatus(progress_status_format_, time_millis)

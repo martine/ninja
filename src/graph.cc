@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <deque>
 #include <optional>
+#include <utility>
 #include <assert.h>
 #include <stdio.h>
 
@@ -25,6 +26,7 @@
 #include "depfile_parser.h"
 #include "deps_log.h"
 #include "disk_interface.h"
+#include "file_scope.h"
 #include "manifest_parser.h"
 #include "metrics.h"
 #include "state.h"
@@ -607,13 +609,13 @@ bool Edge::AllInputsReady() const {
   return true;
 }
 
-/// An Env for an Edge, providing $in and $out.
-struct EdgeEnv : public Env {
+/// The scope for evaluating an Edge's variables, providing $in and $out.
+struct EdgeScope {
   enum EscapeKind { kShellEscape, kDoNotEscape };
 
-  EdgeEnv(const Edge* const edge, const EscapeKind escape)
+  EdgeScope(const Edge* const edge, const EscapeKind escape)
       : edge_(edge), escape_in_out_(escape), recursive_(false) {}
-  virtual std::string LookupVariable(StringPiece var);
+  std::string LookupVariable(StringPiece var);
 
   /// Given a span of Nodes, construct a list of paths suitable for a command
   /// line.
@@ -626,7 +628,7 @@ struct EdgeEnv : public Env {
   bool recursive_;
 };
 
-std::string EdgeEnv::LookupVariable(StringPiece var) {
+std::string EdgeScope::LookupVariable(StringPiece var) {
   if (var == "in" || var == "in_newline") {
     int explicit_deps_count =
         static_cast<int>(edge_->inputs_.size() - edge_->implicit_deps_ -
@@ -687,22 +689,33 @@ std::string EdgeEnv::LookupVariable(StringPiece var) {
     }
   }
 
-  // See notes on BindingEnv::LookupWithFallback.
-  const EvalString* eval = edge_->rule_->GetBinding(var);
-  bool record_varname = recursive_ && eval;
-  if (record_varname)
-    lookups_.push_back(var.AsString());
+  // After $in and $out, the lookup order is:
+  // 1) Variables set on the build block itself.
+  if (std::optional<StringPiece> value = edge_->bindings_.FindBinding(var))
+    return value->AsString();
 
-  // In practice, variables defined on rules never use another rule variable.
-  // For performance, only start checking for cycles after the first lookup.
-  recursive_ = true;
-  std::string result = edge_->env_->LookupWithFallback(var, eval, this);
-  if (record_varname)
-    lookups_.pop_back();
-  return result;
+  // 2) Variables set on the rule, expanded in this scope.  Only these can
+  //    refer back to this scope, so recursive_ is set while one is being
+  //    evaluated.  In practice, variables defined on rules never use another
+  //    rule variable, so for performance only the variables looked up while
+  //    evaluating one are recorded for cycle checking.
+  if (const EvalString* eval = edge_->rule_->GetBinding(var)) {
+    const bool record_varname = std::exchange(recursive_, true);
+    if (record_varname)
+      lookups_.push_back(var.AsString());
+    std::string result = eval->Evaluate(this);
+    if (record_varname)
+      lookups_.pop_back();
+    recursive_ = record_varname;
+    return result;
+  }
+
+  // 3) Variables set in the file containing the build block, then in the
+  //    files that include it with "subninja".
+  return edge_->bindings_.parent().LookupVariable(var);
 }
 
-std::string EdgeEnv::MakePathList(const Node* const* const span,
+std::string EdgeScope::MakePathList(const Node* const* const span,
                                   const size_t size, const char sep) const {
   string result;
   for (const Node* const* i = span; i != span + size; ++i) {
@@ -733,7 +746,7 @@ std::string Edge::EvaluateCommand(const bool incl_rsp_file) const {
 }
 
 std::string Edge::GetBinding(StringPiece key) const {
-  EdgeEnv env(this, EdgeEnv::kShellEscape);
+  EdgeScope env(this, EdgeScope::kShellEscape);
   return env.LookupVariable(key);
 }
 
@@ -742,17 +755,17 @@ bool Edge::GetBindingBool(StringPiece key) const {
 }
 
 string Edge::GetUnescapedDepfile() const {
-  EdgeEnv env(this, EdgeEnv::kDoNotEscape);
+  EdgeScope env(this, EdgeScope::kDoNotEscape);
   return env.LookupVariable("depfile");
 }
 
 string Edge::GetUnescapedDyndep() const {
-  EdgeEnv env(this, EdgeEnv::kDoNotEscape);
+  EdgeScope env(this, EdgeScope::kDoNotEscape);
   return env.LookupVariable("dyndep");
 }
 
 std::string Edge::GetUnescapedRspfile() const {
-  EdgeEnv env(this, EdgeEnv::kDoNotEscape);
+  EdgeScope env(this, EdgeScope::kDoNotEscape);
   return env.LookupVariable("rspfile");
 }
 
