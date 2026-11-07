@@ -137,9 +137,10 @@ int Cleaner::CleanDead(const BuildLog::Entries& entries) {
     //
     // - If it isn't an output or input for any edge, it comes from a stale
     //   entry in the deps log, but no longer referenced from the build
-    //   graph.
+    //   graph. Edges that only reference it via the deps log don't count,
+    //   so the recorded out-edges are sufficient.
     //
-    if (!n || (!n->in_edge() && n->out_edges().empty())) {
+    if (!n || (!n->in_edge() && n->recorded_out_edges().empty())) {
       Remove(i->first.AsString());
     }
   }

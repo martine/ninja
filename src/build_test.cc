@@ -3895,6 +3895,79 @@ TEST_F(BuildTest, DyndepBuildDiscoverOutputAndDepfileInput) {
   EXPECT_TRUE(builder_.AlreadyUpToDate());
 }
 
+TEST_F(BuildTest, DyndepBuildDiscoverOutputOfLoadedDep) {
+  // Verify that when a node that was loaded from a depfile of a clean edge
+  // gains an in-edge from a dyndep file, it knows about its out-edges.
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+"rule touch\n"
+"  command = touch $out $out.imp\n"
+"rule cp\n"
+"  command = cp $in $out\n"
+"build dd: cp dd-in\n"
+"build tmp: touch || dd\n"
+"  dyndep = dd\n"
+"build out: cp in || dd\n"
+"  depfile = out.d\n"
+));
+  fs_.Create("in", "");
+  fs_.Create("tmp", "");
+  fs_.Create("tmp.imp", "");
+  fs_.Tick();
+  fs_.Create("out", "");
+  fs_.Create("out.d", "out: tmp.imp\n");
+  fs_.Create("dd-in",
+"ninja_dyndep_version = 1\n"
+"build tmp | tmp.imp: dyndep\n"
+);
+
+  string err;
+  EXPECT_TRUE(builder_.AddTarget("tmp", &err));
+  EXPECT_TRUE(builder_.AddTarget("out", &err));
+  ASSERT_EQ("", err);
+  EXPECT_EQ(builder_.Build(&err), ExitSuccess);
+  EXPECT_EQ("", err);
+
+  Node* imp = GetNode("tmp.imp");
+  ASSERT_TRUE(imp->in_edge());
+  Edge* out_edge = GetNode("out")->in_edge();
+  EXPECT_EQ(1, std::count(imp->out_edges().begin(), imp->out_edges().end(),
+                          out_edge));
+  ASSERT_EQ(1u, command_runner_.commands_ran_.size());
+  EXPECT_EQ("cp dd-in dd", command_runner_.commands_ran_[0]);
+}
+
+TEST_F(BuildTest, DyndepSourceLoadedAsDep) {
+  // Verify that a dyndep file without an in-edge can be loaded after it was
+  // loaded from the depfile of another edge.
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+"rule touch\n"
+"  command = touch $out\n"
+"rule cp\n"
+"  command = cp $in $out\n"
+"build out: cp in\n"
+"  depfile = out.d\n"
+"build tmp: touch || dd\n"
+"  dyndep = dd\n"
+));
+  fs_.Create("in", "");
+  fs_.Create("dd",
+"ninja_dyndep_version = 1\n"
+"build tmp: dyndep\n"
+);
+  fs_.Tick();
+  fs_.Create("out", "");
+  fs_.Create("out.d", "out: dd\n");
+
+  string err;
+  EXPECT_TRUE(builder_.AddTarget("out", &err));
+  EXPECT_TRUE(builder_.AddTarget("tmp", &err));
+  ASSERT_EQ("", err);
+  EXPECT_EQ(builder_.Build(&err), ExitSuccess);
+  EXPECT_EQ("", err);
+  ASSERT_EQ(1u, command_runner_.commands_ran_.size());
+  EXPECT_EQ("touch tmp", command_runner_.commands_ran_[0]);
+}
+
 TEST_F(BuildTest, DyndepBuildDiscoverNowWantEdge) {
   // Verify that a dyndep file can be built and loaded to discover
   // that an edge is actually wanted due to a missing implicit output.

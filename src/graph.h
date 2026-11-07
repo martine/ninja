@@ -16,6 +16,7 @@
 #define NINJA_GRAPH_H_
 
 #include <algorithm>
+#include <assert.h>
 #include <optional>
 #include <queue>
 #include <set>
@@ -100,7 +101,23 @@ struct Node {
   void set_dyndep_pending(bool pending) { dyndep_pending_ = pending; }
 
   Edge* in_edge() const { return in_edge_; }
-  void set_in_edge(Edge* edge) { in_edge_ = edge; }
+  void set_in_edge(Edge* edge) {
+    assert(!has_unrecorded_out_edges_);
+    in_edge_ = edge;
+  }
+
+  // This overload must be used wherever deps may already have been loaded,
+  // i.e. once the build graph walk has started. It will fill in the out-edge
+  // list if it was left incomplete by AddLazyOutEdge().
+  void set_in_edge(Edge* edge, State* state) {
+    in_edge_ = edge;
+    if (has_unrecorded_out_edges_) {
+      has_unrecorded_out_edges_ = false;
+      ResolveOutEdges(state);
+    }
+  }
+
+  void ResolveOutEdges(State* state);
 
   /// Indicates whether this node was generated from a depfile or dyndep file,
   /// instead of being a regular input or output from the Ninja manifest.
@@ -113,9 +130,33 @@ struct Node {
   int id() const { return id_; }
   void set_id(int id) { id_ = id; }
 
-  const std::vector<Edge*>& out_edges() const { return out_edges_; }
+  /// All edges that use this node as an input. Must not be called if the
+  /// list may be incomplete; see AddLazyOutEdge().
+  const std::vector<Edge*>& out_edges() const {
+    assert(!has_unrecorded_out_edges_);
+    return out_edges_;
+  }
+
+  /// Edges that use this node as an input in the manifest or a dyndep file.
+  /// Edges that only depend on this node via a depfile or the deps log may be
+  /// missing if the node has no in-edge.
+  const std::vector<Edge*>& recorded_out_edges() const { return out_edges_; }
   const std::vector<Edge*>& validation_out_edges() const { return validation_out_edges_; }
   void AddOutEdge(Edge* edge) { out_edges_.push_back(edge); }
+
+  // Add an out-edge that is unlikely to be queried, such as an edge from a
+  // depfile header to a build statement. Nodes that already have in-edges, such
+  // as generated headers, are expected to be queried as part of the graph walk,
+  // so we add the out-edge directly. Otherwise, we just remember that the
+  // out-edge exists so that we can correctly handle the rare case of an in-edge
+  // appearing later, via a dyndep file's implicit output.
+  void AddLazyOutEdge(Edge* edge) {
+    if (in_edge())
+      AddOutEdge(edge);
+    else
+      has_unrecorded_out_edges_ = true;
+  }
+
   void RemoveOutEdge(Edge* edge) {
     out_edges_.erase(std::remove(out_edges_.begin(), out_edges_.end(), edge),
                      out_edges_.end());
@@ -162,6 +203,9 @@ private:
   /// all nodes have this flag set to true, since the deps and build logs
   /// can be loaded before the manifest.
   bool generated_by_dep_loader_ = true;
+
+  /// See AddLazyOutEdge().
+  bool has_unrecorded_out_edges_ = false;
 
   /// A dense integer id for the node, assigned and used by DepsLog.
   int id_ = -1;
