@@ -20,7 +20,7 @@
 #include <memory>
 #include <vector>
 
-struct BindingEnv;
+struct FileScope;
 struct EvalString;
 
 enum DupeEdgeAction {
@@ -68,7 +68,7 @@ struct ManifestParser : public Parser {
   /// Parse either a 'subninja' or 'include' line.
   bool ParseFileInclude(bool new_scope, std::string* err);
 
-  BindingEnv* env_;
+  FileScope* scope_;
   ManifestParserOptions options_;
   bool quiet_;
 

@@ -33,7 +33,7 @@ TEST(State, Basic) {
   rule->AddBinding("command", command);
   state.bindings_.AddRule(std::unique_ptr<Rule>(rule));
 
-  Edge* edge = state.AddEdge(rule);
+  Edge* edge = state.AddEdge(rule, &state.bindings_);
   state.AddIn(edge, "in1", 0);
   state.AddIn(edge, "in2", 0);
   state.AddOut(edge, "out", 0, nullptr);

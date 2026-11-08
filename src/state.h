@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "eval_env.h"
+#include "file_scope.h"
 #include "graph.h"
 #include "hash_map.h"
 #include "util.h"
@@ -101,7 +102,8 @@ struct State {
   void AddPool(Pool* pool);
   Pool* LookupPool(const std::string& pool_name);
 
-  Edge* AddEdge(const Rule* rule);
+  /// Add an edge declared in the manifest file whose scope is `scope`.
+  Edge* AddEdge(const Rule* rule, FileScope* scope);
 
   Node* GetNode(StringPiece path, uint64_t slash_bits);
   Node* LookupNode(StringPiece path) const;
@@ -137,7 +139,7 @@ struct State {
   /// All the edges of the graph.
   std::vector<Edge*> edges_;
 
-  BindingEnv bindings_;
+  FileScope bindings_;
   std::vector<Node*> defaults_;
 };
 

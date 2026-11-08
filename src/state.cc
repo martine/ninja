@@ -82,11 +82,10 @@ Pool* State::LookupPool(const string& pool_name) {
   return i->second;
 }
 
-Edge* State::AddEdge(const Rule* rule) {
-  Edge* edge = new Edge();
+Edge* State::AddEdge(const Rule* rule, FileScope* scope) {
+  Edge* edge = new Edge(scope);
   edge->rule_ = rule;
   edge->pool_ = &State::kDefaultPool;
-  edge->env_ = &bindings_;
   edge->id_ = edges_.size();
   edges_.push_back(edge);
   return edge;

@@ -750,7 +750,7 @@ int NinjaMain::ToolRules(const Options* options, int argc, char* argv[]) {
   // Print rules
 
   for (const auto& r : state_.bindings_.GetRules()) {
-    printf("%s", r.first.c_str());
+    printf("%.*s", static_cast<int>(r.first.size()), r.first.data());
     if (print_description) {
       const Rule* rule = r.second.get();
       const EvalString* description = rule->GetBinding("description");

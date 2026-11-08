@@ -185,6 +185,66 @@ TEST_F(ParserTest, VariableScope) {
   EXPECT_EQ("cmd bar b outer", state.edges_[1]->EvaluateCommand());
 }
 
+TEST_F(ParserTest, RuleBindingPrecedence) {
+  ASSERT_NO_FATAL_FAILURE(
+      AssertParse("rule r\n"
+                  "  command = $description $in $out\n"
+                  "  description = rule $flags\n"
+                  "  restat =\n"
+                  "build plain: r in\n"
+                  "build unrelated: r in\n"
+                  "  unused = blank\n"
+                  "build overridden: r in\n"
+                  "  description = edge\n"
+                  "build empty: r in\n"
+                  "  description =\n"
+                  "command = file command\n"
+                  "description = file description\n"
+                  "restat = 1\n"
+                  "flags = late\n"));
+
+  ASSERT_EQ(4u, state.edges_.size());
+  EXPECT_EQ("rule late in plain", state.edges_[0]->EvaluateCommand());
+  EXPECT_EQ("rule late in unrelated", state.edges_[1]->EvaluateCommand());
+  EXPECT_EQ("edge in overridden", state.edges_[2]->EvaluateCommand());
+  EXPECT_EQ(" in empty", state.edges_[3]->EvaluateCommand());
+  for (const Edge* edge : state.edges_)
+    EXPECT_FALSE(edge->GetBindingBool("restat"));
+}
+
+TEST_F(ParserTest, RuleBindingSubninjaScope) {
+  fs_.Create("first.ninja",
+             "command = first file command\n"
+             "flags = first\n"
+             "include included.ninja\n"
+             "subninja nested.ninja\n");
+  fs_.Create("included.ninja", "build included: r in\n");
+  fs_.Create("nested.ninja", "build nested: r in\n");
+  fs_.Create("second.ninja",
+             "command = second file command\n"
+             "flags = second\n"
+             "build second: r in\n"
+             "build second_local: r in\n"
+             "  unused = blank\n");
+  ASSERT_NO_FATAL_FAILURE(
+      AssertParse("rule r\n"
+                  "  command = rule $flags $in $out\n"
+                  "build before: r in\n"
+                  "subninja first.ninja\n"
+                  "subninja second.ninja\n"
+                  "build after: r in\n"
+                  "command = outer file command\n"
+                  "flags = outer\n"));
+
+  ASSERT_EQ(6u, state.edges_.size());
+  EXPECT_EQ("rule outer in before", state.edges_[0]->EvaluateCommand());
+  EXPECT_EQ("rule first in included", state.edges_[1]->EvaluateCommand());
+  EXPECT_EQ("rule first in nested", state.edges_[2]->EvaluateCommand());
+  EXPECT_EQ("rule second in second", state.edges_[3]->EvaluateCommand());
+  EXPECT_EQ("rule second in second_local", state.edges_[4]->EvaluateCommand());
+  EXPECT_EQ("rule outer in after", state.edges_[5]->EvaluateCommand());
+}
+
 TEST_F(ParserTest, Continuation) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(
 "rule link\n"

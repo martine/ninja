@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "string_piece.h"
@@ -25,18 +26,14 @@
 
 struct Rule;
 
-/// An interface for a scope for variable (e.g. "$foo") lookups.
-struct Env {
-  virtual ~Env() {}
-  virtual std::string LookupVariable(StringPiece var) = 0;
-};
-
 /// A tokenized string that contains variable references.
-/// Can be evaluated relative to an Env.
+/// Can be evaluated relative to a scope.
 struct EvalString {
-  /// @return The evaluated string with variable expanded using value found in
-  ///         environment @a env.
-  std::string Evaluate(Env* env) const;
+  /// @return The evaluated string, with each variable expanded to the value
+  ///         returned by `scope->LookupVariable(name)`.  A scope is any type
+  ///         with a `std::string LookupVariable(StringPiece)` member.
+  template <typename Scope>
+  std::string Evaluate(Scope* scope) const;
 
   /// @return The string with variables not expanded.
   std::string Unparse() const;
@@ -89,35 +86,20 @@ struct Rule {
   bool phony_ = false;
 };
 
-/// An Env which contains a mapping of variables to values
-/// as well as a pointer to a parent scope.
-struct BindingEnv : public Env {
-  BindingEnv() : parent_(NULL) {}
-  explicit BindingEnv(BindingEnv* parent) : parent_(parent) {}
+template <typename Scope>
+std::string EvalString::Evaluate(Scope* scope) const {
+  if (parsed_.empty()) {
+    return single_token_;
+  }
 
-  virtual ~BindingEnv() {}
-  virtual std::string LookupVariable(StringPiece var);
-
-  void AddRule(std::unique_ptr<const Rule> rule);
-  const Rule* LookupRule(StringPiece rule_name);
-  const Rule* LookupRuleCurrentScope(StringPiece rule_name);
-  const std::map<std::string, std::unique_ptr<const Rule>, StringPieceLess>&
-  GetRules() const;
-
-  void AddBinding(const std::string& key, StringPiece val);
-
-  /// This is tricky.  Edges want lookup scope to go in this order:
-  /// 1) value set on edge itself (edge_->env_)
-  /// 2) value set on rule, with expansion in the edge's scope
-  /// 3) value set on enclosing scope of edge (edge_->env_->parent_)
-  /// This function takes as parameters the necessary info to do (2).
-  std::string LookupWithFallback(StringPiece var, const EvalString* eval,
-                                 Env* env);
-
-private:
-  std::map<std::string, std::string, StringPieceLess> bindings_;
-  std::map<std::string, std::unique_ptr<const Rule>, StringPieceLess> rules_;
-  BindingEnv* parent_;
-};
+  std::string result;
+  for (TokenList::const_iterator i = parsed_.begin(); i != parsed_.end(); ++i) {
+    if (i->second == RAW)
+      result.append(i->first);
+    else
+      result.append(scope->LookupVariable(i->first));
+  }
+  return result;
+}
 
 #endif  // NINJA_EVAL_ENV_H_

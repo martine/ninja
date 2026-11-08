@@ -82,7 +82,7 @@ bool DyndepParser::ParseDyndepVersion(string* err) {
   if (name != "ninja_dyndep_version") {
     return lexer_.Error("expected 'ninja_dyndep_version = ...'", err);
   }
-  string version = let_value.Evaluate(&env_);
+  string version = let_value.Evaluate(&scope_);
   int major, minor;
   ParseVersion(version, &major, &minor);
   if (major != 1 || minor != 0) {
@@ -109,7 +109,7 @@ bool DyndepParser::ParseEdge(string* err) {
     if (out0.empty())
       return lexer_.Error("expected path", err);
 
-    string path = out0.Evaluate(&env_);
+    string path = out0.Evaluate(&scope_);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
@@ -190,13 +190,13 @@ bool DyndepParser::ParseEdge(string* err) {
       return false;
     if (key != "restat")
       return lexer_.Error("binding is not 'restat'", err);
-    string value = val.Evaluate(&env_);
+    string value = val.Evaluate(&scope_);
     dyndeps->restat_ = !value.empty();
   }
 
   dyndeps->implicit_inputs_.reserve(ins.size());
   for (const EvalString& in : ins) {
-    string path = in.Evaluate(&env_);
+    string path = in.Evaluate(&scope_);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
@@ -207,7 +207,7 @@ bool DyndepParser::ParseEdge(string* err) {
 
   dyndeps->implicit_outputs_.reserve(outs.size());
   for (const EvalString& out : outs) {
-    string path = out.Evaluate(&env_);
+    string path = out.Evaluate(&scope_);
     if (path.empty())
       return lexer_.Error("empty path", err);
     uint64_t slash_bits;
