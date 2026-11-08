@@ -102,6 +102,7 @@ struct State {
   Pool* LookupPool(const std::string& pool_name);
 
   Edge* AddEdge(const Rule* rule);
+  void AddEdge(const Rule* rule, Edge* edge);
 
   Node* GetNode(StringPiece path, uint64_t slash_bits);
   Node* LookupNode(StringPiece path) const;

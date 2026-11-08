@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <optional>
 
 #ifdef _WIN32
 #include "getopt.h"
@@ -35,6 +36,7 @@
 #include <unistd.h>
 #endif
 
+#include "binary.h"
 #include "browse.h"
 #include "build.h"
 #include "build_log.h"
@@ -87,6 +89,9 @@ struct Options {
 
   /// Whether phony cycles should warn or print an error.
   bool phony_cycle_should_err;
+
+  /// Whether to read/write a binary manifest cache alongside build.ninja.
+  bool use_cache;
 };
 
 /// Helper class used to manage the state of jobserver pool and client
@@ -297,7 +302,8 @@ void Usage(const BuildConfig& config) {
 "  --jobserver-pool\n"
 "           setup a GNU jobserver pool of job slots matching the\n"
 "           current parallel job configuration. Ignored if -j1 is\n"
-"           specified explicitly, or if an existing pool is detected\n\n",
+"           specified explicitly, or if an existing pool is detected\n\n"
+"  --cache  use a binary manifest cache (.build.ninja.bin) to speed up parsing\n\n",
           kNinjaVersion, config.parallelism);
 }
 
@@ -1850,6 +1856,7 @@ int ReadFlags(int* argc, char*** argv,
     OPT_QUIET = 2,
     OPT_STATUS = 3,
     OPT_JOBSERVER_POOL = 4,
+    OPT_CACHE = 5
   };
   const option kLongOptions[] = {
     { "help", no_argument, NULL, 'h' },
@@ -1858,6 +1865,7 @@ int ReadFlags(int* argc, char*** argv,
     { "quiet", no_argument, NULL, OPT_QUIET },
     { "status", required_argument, NULL, OPT_STATUS },
     { "jobserver-pool", no_argument, NULL, OPT_JOBSERVER_POOL },
+    { "cache", no_argument, NULL, OPT_CACHE },
     { NULL, 0, NULL, 0 }
   };
 
@@ -1925,6 +1933,9 @@ int ReadFlags(int* argc, char*** argv,
       case OPT_STATUS:
         config->progress_status_format = optarg;
         break;
+      case OPT_CACHE:
+        options->use_cache = true;
+        break;
       case 'w':
         if (!WarningEnable(optarg, options))
           return 1;
@@ -1948,6 +1959,101 @@ int ReadFlags(int* argc, char*** argv,
   *argv += optind;
   *argc -= optind;
   return -1;
+}
+
+/// Parses the build manifest, either from the cached binary representation
+/// or by falling back to the ASCII (.ninja) manifest parser.
+/// Returns std::nullopt on failure (parse error), otherwise returns the
+/// value of the "enable_jobserver_pool" variable read from the manifest.
+std::optional<std::string> parse(const Options& options, NinjaMain& ninja,
+           ManifestParserOptions& parser_opts, BuildConfig& config,
+           Status* status, const int cycle, std::string& err) {
+  // Derive the hidden binary cache path by prepending '.' to the manifest
+  // path and appending '.bin', e.g. "build.ninja" -> ".build.ninja.bin".
+  auto BinPath = [](const char* input_file) -> std::string {
+    return "." + string(input_file) + ".bin";
+  };
+
+  std::string enable_jobserver_pool;
+
+  // Tracks whether the manifest state has already been fully populated
+  // from the binary cache, to skip the (slower) ASCII parse below.
+  bool loaded = false;
+
+  if (options.use_cache && cycle == 1) {
+    // only the first loop (cycle == 1) cannot be a rebuild
+    // check for a binary manifest parse
+
+    std::string err_stat;
+    const std::string bin_path = BinPath(options.input_file);
+
+    // Check whether a binary cache file exists at all.
+    TimeStamp bin_mtime = ninja.disk_interface_.Stat(bin_path, &err_stat);
+    if (bin_mtime > 0) {
+      // Cache file exists
+      const TimeStamp ninja_mtime =
+          ninja.disk_interface_.Stat(options.input_file, &err_stat);
+
+      if (ninja_mtime > 0) {
+        if (!(bin_mtime < ninja_mtime)) {
+          METRIC_RECORD(".ninja parse binary");
+          // Open the binary cache file for reading.
+          // ReadBinaryDisk in(bin_path);
+          auto in = ReadBinaryTest::file(bin_path);
+
+          // Decide if the cache is still valid
+          const bool use_cache = [&]() {
+            // The manifest may include/subninja other files. Read the
+            // list of included files that was stored in the cache and make
+            // sure none of them are older than the ASCII-Manifest.
+            auto files = ReadIncludeFiles(in);
+            if (files) {
+              for (const auto& file : files.value()) {
+                const TimeStamp file_mtime =
+                    ninja.disk_interface_.Stat(file, &err);
+                if (file_mtime <= 0 || file_mtime >= bin_mtime) {
+                  Info("Binary Manifest is outdated");
+                  return false;  // cache is outdated
+                }
+              }
+              return true;
+            } else {
+              // error in reading cache, fall back to ASCII-Manifest
+              Warning("Binary Manifest reading error");
+              return false;
+            }
+          }();
+
+          if (use_cache) {
+            enable_jobserver_pool = ReadManifestCache(in, &ninja.state_);
+            loaded = true;
+          }
+        } else
+          Info("Binary Manifest is outdated");
+      }
+    }
+  }
+
+  if (!loaded) {
+    // Parse the human-readable ASCII manifest.
+    ManifestParser parser(&ninja.state_, &ninja.disk_interface_, parser_opts);
+    if (!parser.Load(options.input_file, &err)) {
+      return std::nullopt;
+    }
+
+    enable_jobserver_pool = parser.LookupVariable("enable_jobserver_pool");
+
+    // write a binary manifest of the freshly parsed state, so the next
+    // call can skip the ASCII parse via the cache path
+    if (options.use_cache && !config.dry_run) {
+      const std::string bin_path = BinPath(options.input_file);
+      WriteBinaryDisk out(bin_path);
+      WriteManifestCache(out, &ninja.state_, parser.getIncludes(),
+                         parser.getFileEnv_());
+    }
+  }
+
+  return enable_jobserver_pool;
 }
 
 NORETURN void real_main(int argc, char** argv) {
@@ -2005,9 +2111,13 @@ NORETURN void real_main(int argc, char** argv) {
     if (options.phony_cycle_should_err) {
       parser_opts.phony_cycle_action_ = kPhonyCycleActionError;
     }
-    ManifestParser parser(&ninja.state_, &ninja.disk_interface_, parser_opts);
-    string err;
-    if (!parser.Load(options.input_file, &err)) {
+
+    // parse the manifest, ascii or binary
+    std::string err;
+    std::optional<std::string> enable_jobserver_pool =
+        parse(options, ninja, parser_opts, config, status, cycle, err);
+    if (!enable_jobserver_pool) {
+      // Fatal Failure
       status->Error("%s", err.c_str());
       exit(1);
     }
@@ -2041,8 +2151,6 @@ NORETURN void real_main(int argc, char** argv) {
     // if --jobserver-pool had been passed on the command line. Note that
     // any other value is ignored (thus 0 does not disable the flag if it is
     // used).
-    std::string enable_jobserver_pool =
-        parser.LookupVariable("enable_jobserver_pool");
     if (enable_jobserver_pool == "1") {
       const_cast<BuildConfig&>(ninja.config_).jobserver_pool = true;
     }

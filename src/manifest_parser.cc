@@ -436,15 +436,23 @@ bool ManifestParser::ParseFileInclude(bool new_scope, string* err) {
   }
   if (new_scope) {
     subparser_->env_ = new BindingEnv(env_);
+    // Order matters for binary manifest:
+    // fileEnv_ must stay in topological order (each env's parent must
+    // already be present before its children)
+    fileEnv_.push_back(subparser_->env_);
   } else {
     subparser_->env_ = env_;
   }
 
+  includePaths_.push_back(path);
   if (!subparser_->Load(path, err, &lexer_))
     return false;
 
-  if (!ExpectToken(Lexer::NEWLINE, err))
-    return false;
+  auto includes = subparser_->getIncludes();
+  includePaths_.insert(includePaths_.end(), includes.begin(), includes.end());
 
-  return true;
+  auto includesEnv = subparser_->getFileEnv_();
+  fileEnv_.insert(fileEnv_.end(), includesEnv.begin(), includesEnv.end());
+
+  return ExpectToken(Lexer::NEWLINE, err);
 }

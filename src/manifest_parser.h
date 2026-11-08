@@ -42,6 +42,9 @@ struct ManifestParser : public Parser {
   ManifestParser(State* state, FileReader* file_reader,
                  ManifestParserOptions options = ManifestParserOptions());
 
+  const std::vector<std::string>& getIncludes() const { return includePaths_; }
+  const std::vector<BindingEnv*>& getFileEnv_() const { return fileEnv_; }
+
   /// Parse a text string of input.  Used by tests.
   bool ParseTest(const std::string& input, std::string* err) {
     quiet_ = true;
@@ -77,6 +80,11 @@ struct ManifestParser : public Parser {
   // subparser_ is reused solely to get better reuse out ins_/outs_/validation_.
   std::unique_ptr<ManifestParser> subparser_;
   std::vector<EvalString> ins_, outs_, validations_;
+
+  // collects all include paths of the top level manifest
+  std::vector<std::string> includePaths_;
+  // all file level bindings except root
+  std::vector<BindingEnv*> fileEnv_;
 };
 
 #endif  // NINJA_MANIFEST_PARSER_H_

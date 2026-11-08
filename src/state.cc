@@ -92,6 +92,14 @@ Edge* State::AddEdge(const Rule* rule) {
   return edge;
 }
 
+void State::AddEdge(const Rule* rule, Edge* edge) {
+  edge->rule_ = rule;
+  edge->pool_ = &State::kDefaultPool;
+  edge->env_ = &bindings_;
+  edge->id_ = edges_.size();
+  edges_.push_back(edge);
+}
+
 Node* State::GetNode(StringPiece path, uint64_t slash_bits) {
   Node* node = LookupNode(path);
   if (node)

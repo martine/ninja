@@ -92,6 +92,15 @@ const map<string, std::unique_ptr<const Rule>, StringPieceLess>& BindingEnv::Get
   return rules_;
 }
 
+const std::map<std::string, std::string, StringPieceLess>&
+BindingEnv::GetBindings() const {
+  return bindings_;
+}
+
+const BindingEnv* BindingEnv::GetParent() const {
+  return parent_;
+}
+
 std::string BindingEnv::LookupWithFallback(StringPiece var,
                                            const EvalString* eval,
                                            Env* env) {

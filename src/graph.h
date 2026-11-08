@@ -42,8 +42,13 @@ struct State;
 /// Information about a node in the dependency graph: the file, whether
 /// it's dirty, mtime, etc.
 struct Node {
-  Node(const std::string& path, uint64_t slash_bits)
-      : path_(path), slash_bits_(slash_bits) {}
+  Node(const std::string& path, uint64_t slash_bits, bool dep_loader = true)
+      : path_(path), slash_bits_(slash_bits),
+        generated_by_dep_loader_(dep_loader) {}
+
+  Node(std::string&& path, uint64_t slash_bits, bool dep_loader = true)
+      : path_(std::move(path)), slash_bits_(slash_bits),
+        generated_by_dep_loader_(dep_loader) {}
 
   /// Return false on error.
   bool Stat(DiskInterface* disk_interface, std::string* err);
