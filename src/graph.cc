@@ -52,6 +52,9 @@ struct LazyEdgeCommandHash {
   bool valid_ = false;
 };
 
+#define CACHED_LOG_ENTRY_INIT_SENTINEL \
+  (reinterpret_cast<BuildLog::LogEntry*>(1))
+
 /// Performance‑optimized helper class for recomputing the dirty state of
 /// outputs.
 ///
@@ -78,7 +81,7 @@ class RecomputeOutputsDirtyCache {
     CachedLogEntry(){};
 
     /// check for nullptr
-    bool is_valid() const { return entry_; }
+    bool is_valid() const { return entry_ && entry_ != CACHED_LOG_ENTRY_INIT_SENTINEL; }
     /// When calling this function repeatedly for the same object,
     /// the `buildLog` and `output` pointers must remain unchanged.
     /// Stable pointer identity is required for correct caching behavior.
@@ -86,8 +89,9 @@ class RecomputeOutputsDirtyCache {
     const BuildLog::LogEntry* operator->() const { return entry_; }
 
    private:
-    bool evaluated_ = false;
-    BuildLog::LogEntry* entry_ = nullptr;
+    // CACHED_LOG_ENTRY_INIT_SENTINEL meaning "not yet evaluated". Nullptr means
+    // "evaluated, not found".
+    BuildLog::LogEntry* entry_ = CACHED_LOG_ENTRY_INIT_SENTINEL;
 
 #ifndef NDEBUG
     const Node* checkOutput_ = nullptr;
@@ -97,8 +101,7 @@ class RecomputeOutputsDirtyCache {
  public:
   RecomputeOutputsDirtyCache(BuildLog* build_log,
                              OptionalExplanations& explanations, Edge* edge)
-      : buildLog_(build_log), explanations_(explanations), edge_(edge),
-        logEntry_(edge->outputs_.size()) {}
+      : buildLog_(build_log), explanations_(explanations), edge_(edge) {}
 
   /// Determines whether at least one output of edge 'edge_' is considered dirty.
   ///
@@ -133,14 +136,25 @@ class RecomputeOutputsDirtyCache {
   /// Returns true if dirty.
   bool Phony(Node* output, const Node* most_recent_input) const;
 
+  /// Returns whether 'edge_' has the "restat" binding set.
+  /// The binding is looked up on first use and cached.
+  bool is_restat();
+
   const BuildLog* const buildLog_;
   OptionalExplanations& explanations_;
   const Edge* const edge_;
 
-  const bool isRestat_ = edge_->GetBindingBool("restat");
+  bool isRestat_ = false;
+  bool is_restat_init_ = false;
+
   bool generator_ = false;
   bool generatorValid_ = false;
-  std::vector<CachedLogEntry> logEntry_;
+
+  // Exactly one of these is used per edge, decided by number of edges' outputs_
+  // - one output: logEntryOneOutput_ (no heap allocation)
+  // - otherwise : logEntryVec_
+  CachedLogEntry logEntryOneOutput_;
+  std::vector<CachedLogEntry> logEntryVec_;
   LazyEdgeCommandHash commandHash_ = LazyEdgeCommandHash(edge_);
 
 #ifndef NDEBUG
@@ -148,13 +162,21 @@ class RecomputeOutputsDirtyCache {
 #endif
 };
 
+bool RecomputeOutputsDirtyCache::is_restat() {
+  if (!is_restat_init_) {
+    is_restat_init_ = true;
+    isRestat_ = edge_->GetBindingBool("restat");
+  }
+
+  return isRestat_;
+}
+
 bool RecomputeOutputsDirtyCache::CachedLogEntry::LookupByOutput(
     const BuildLog* buildLog, const Node* output) {
-  if (evaluated_) {
+  if (entry_ != CACHED_LOG_ENTRY_INIT_SENTINEL) {
     assert(output == checkOutput_);
     return entry_;
   }
-  evaluated_ = true;
   assert((checkOutput_ = output, true));
   return (entry_ = buildLog->LookupByOutput(output->path()));
 }
@@ -163,13 +185,32 @@ bool RecomputeOutputsDirtyCache::all(const Node* most_recent_input) {
   assert((checkOutputs_.assign(edge_->outputs_.begin(), edge_->outputs_.end()),
           true));
 
+  // Checks a single output of `edge_`.
+  //
+  // \param output  One of `edge_->outputs_`.
+  // \param entry   Cached build-log entry belonging to `output`.
+  //                Unused for phony edges, which have no log entries.
+  // \return `true` if `output` is dirty with respect to `most_recent_input`.
+  auto isOutputDirty = [&](Node* output, CachedLogEntry& entry) -> bool {
+    return edge_->is_phony()
+               ? Phony(output, most_recent_input)
+               : RecomputeOutputDirty<true>(output, most_recent_input, entry);
+  };
+
+  // Fast path for single output, no heap allocation.
+  // Must match the size()==1 branch in RecomputeOutputDirtyCache::depfile(),
+  // logEntry[OneOutput|Vec]
+  if (edge_->outputs_.size() == 1) {
+    return isOutputDirty(edge_->outputs_.front(), logEntryOneOutput_);
+  }
+
+  // Lazy allocation, phony edges never read logEntry_.
+  if (!edge_->is_phony())
+    logEntryVec_.resize(edge_->outputs_.size());
+
+  // multiple outputs
   for (std::size_t i = 0; i != edge_->outputs_.size(); ++i) {
-    const bool outputDirty =
-        edge_->is_phony()
-            ? Phony(edge_->outputs_[i], most_recent_input)
-            : RecomputeOutputDirty<true>(edge_->outputs_[i], most_recent_input,
-                                         logEntry_[i]);
-    if (outputDirty)
+    if (isOutputDirty(edge_->outputs_[i], logEntryVec_[i]))
       return true;
   }
   return false;
@@ -179,12 +220,20 @@ bool RecomputeOutputsDirtyCache::depfile(const Node* most_recent_input) {
   // Precondition: RecomputeOutputsDirtyCache::all() was previously called
   // with the same edge_->outputs_ as used here.
   assert(std::equal(checkOutputs_.begin(), checkOutputs_.end(),
-                    edge_->outputs_.begin()));
+                    edge_->outputs_.begin(), edge_->outputs_.end()));
+  // Never call this function for phony edges
+  assert(!edge_->is_phony());
+
+  // Must use the same logEntry... (logEntryOneOutput_ vs. logEntry_) as in
+  // RecomputeOutputDirtyCache::all()
+  if (edge_->outputs_.size() == 1) {
+    return RecomputeOutputDirty<false>(edge_->outputs_.front(),
+                                       most_recent_input, logEntryOneOutput_);
+  }
 
   for (std::size_t i = 0; i != edge_->outputs_.size(); ++i) {
-    assert(!edge_->is_phony());
     if (RecomputeOutputDirty<false>(edge_->outputs_[i], most_recent_input,
-                                    logEntry_[i]))
+                                    logEntryVec_[i]))
       return true;
   }
   return false;
@@ -235,7 +284,7 @@ bool RecomputeOutputsDirtyCache::RecomputeOutputDirty(
   // output file's actual mtime and simply check the recorded mtime from
   // the log against the most recent input's mtime (see below)
   bool used_restat = false;
-  if (isRestat_ && buildLog_ && entry.LookupByOutput(buildLog_, output)) {
+  if (is_restat() && buildLog_ && entry.LookupByOutput(buildLog_, output)) {
     used_restat = true;
   }
 
