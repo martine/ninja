@@ -649,10 +649,35 @@ TEST_F(GraphTest, Decanonicalize) {
   EXPECT_EQ(root_nodes[1]->path(), "out/out2/out3/out4");
   EXPECT_EQ(root_nodes[2]->path(), "out3");
   EXPECT_EQ(root_nodes[3]->path(), "out4/foo");
-  EXPECT_EQ(root_nodes[0]->PathDecanonicalized(), "out\\out1");
-  EXPECT_EQ(root_nodes[1]->PathDecanonicalized(), "out\\out2/out3\\out4");
-  EXPECT_EQ(root_nodes[2]->PathDecanonicalized(), "out3");
-  EXPECT_EQ(root_nodes[3]->PathDecanonicalized(), "out4\\foo");
+
+  std::string decanon;
+  root_nodes[0]->AppendPathDecanonicalized(&decanon);
+  EXPECT_EQ(decanon, "out\\out1");
+
+  // Check we are indeed appending to the end
+  decanon = "text at the start:";
+  root_nodes[0]->AppendPathDecanonicalized(&decanon);
+  EXPECT_EQ(decanon, "text at the start:out\\out1");
+
+  decanon.clear();
+  root_nodes[1]->AppendPathDecanonicalized(&decanon);
+  EXPECT_EQ(decanon, "out\\out2/out3\\out4");
+
+  decanon.clear();
+  root_nodes[2]->AppendPathDecanonicalized(&decanon);
+  EXPECT_EQ(decanon, "out3");
+
+  decanon.clear();
+  root_nodes[3]->AppendPathDecanonicalized(&decanon);
+  EXPECT_EQ(decanon, "out4\\foo");
+
+  // In build.cc there is one place we pass `~0u` as the slash_bits
+  // because we assume the output is only backslashes and the existing
+  // code doesn't bother to calculate it.  Ensure this doesn't cause
+  // a problem by indicating there are more backslashes then there are.
+  decanon = "/path/=";
+  Node::AppendPathDecanonicalized(&decanon, "a/b/c", ~0u);
+  EXPECT_EQ(decanon, "/path/=a\\b\\c");
 }
 #endif
 

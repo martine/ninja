@@ -83,11 +83,11 @@ struct Node {
 
   const std::string& path() const { return path_; }
   /// Get |path()| but use slash_bits to convert back to original slash styles.
-  std::string PathDecanonicalized() const {
-    return PathDecanonicalized(path_, slash_bits_);
+  void AppendPathDecanonicalized(std::string* output) const {
+    return AppendPathDecanonicalized(output, path_, slash_bits_);
   }
-  static std::string PathDecanonicalized(const std::string& path,
-                                         uint64_t slash_bits);
+  static void AppendPathDecanonicalized(std::string* output, StringPiece path,
+                                        uint64_t slash_bits);
   uint64_t slash_bits() const { return slash_bits_; }
 
   TimeStamp mtime() const { return mtime_; }
@@ -128,7 +128,7 @@ private:
   std::string path_;
 
   /// Set bits starting from lowest for backslashes that were normalized to
-  /// forward slashes by CanonicalizePath. See |PathDecanonicalized|.
+  /// forward slashes by CanonicalizePath. See |AppendPathDecanonicalized|.
   uint64_t slash_bits_ = 0;
 
   /// Possible values of mtime_:

@@ -414,8 +414,9 @@ Node* NinjaMain::CollectTarget(const char* cpath, string* err) {
     }
     return node;
   } else {
-    *err =
-        "unknown target '" + Node::PathDecanonicalized(path, slash_bits) + "'";
+    *err = "unknown target '";
+    Node::AppendPathDecanonicalized(err, path, slash_bits);
+    *err += "'";
     if (path == "clean") {
       *err += ", did you mean 'ninja -t clean'?";
     } else if (path == "help") {

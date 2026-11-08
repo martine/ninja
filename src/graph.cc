@@ -705,18 +705,20 @@ std::string EdgeEnv::LookupVariable(StringPiece var) {
 std::string EdgeEnv::MakePathList(const Node* const* const span,
                                   const size_t size, const char sep) const {
   string result;
+  std::string temp_path;
   for (const Node* const* i = span; i != span + size; ++i) {
     if (!result.empty())
       result.push_back(sep);
-    const string& path = (*i)->PathDecanonicalized();
     if (escape_in_out_ == kShellEscape) {
+      temp_path.clear();
+      (*i)->AppendPathDecanonicalized(&temp_path);
 #ifdef _WIN32
-      GetWin32EscapedString(path, &result);
+      GetWin32EscapedString(temp_path, &result);
 #else
-      GetShellEscapedString(path, &result);
+      GetShellEscapedString(temp_path, &result);
 #endif
     } else {
-      result.append(path);
+      (*i)->AppendPathDecanonicalized(&result);
     }
   }
   return result;
@@ -801,18 +803,29 @@ bool Edge::maybe_phonycycle_diagnostic() const {
 }
 
 // static
-string Node::PathDecanonicalized(const string& path, uint64_t slash_bits) {
-  string result = path;
+void Node::AppendPathDecanonicalized(std::string* output, StringPiece path,
+                                     uint64_t slash_bits) {
+  if (path.empty()) {
+    return;
+  }
+  output->append(path.begin(), path.end());
 #ifdef _WIN32
-  uint64_t mask = 1;
-  for (char* c = &result[0]; (c = strchr(c, '/')) != NULL;) {
-    if (slash_bits & mask)
+  char* data = &(*output)[0];
+  char* end = data + output->size();
+  char* c = end - path.size();
+  while (slash_bits != 0) {
+    c = static_cast<char*>(memchr(c, '/', end - c));
+
+    // If `memchr` returns null then there are too many bits in `slash_bits`,
+    // which happens when we pass `~0u` in `build.cc` instead of calculating it.
+    if (!c)
+      return;
+    if (slash_bits & 1)
       *c = '\\';
-    c++;
-    mask <<= 1;
+    ++c;
+    slash_bits >>= 1;
   }
 #endif
-  return result;
 }
 
 void Node::Dump(const char* prefix) const {
@@ -1078,22 +1091,23 @@ void InputsCollector::VisitNode(const Node* node) {
 
 std::vector<std::string> InputsCollector::GetInputsAsStrings(
     bool shell_escape) const {
-  std::vector<std::string> result;
-  result.reserve(inputs_.size());
+  std::vector<std::string> result(inputs_.size());
+  auto out = result.begin();
 
+  std::string temp_path;
   for (const Node* input : inputs_) {
-    std::string unescaped = input->PathDecanonicalized();
     if (shell_escape) {
-      std::string path;
+      temp_path.clear();
+      input->AppendPathDecanonicalized(&temp_path);
 #ifdef _WIN32
-      GetWin32EscapedString(unescaped, &path);
+      GetWin32EscapedString(temp_path, &*out);
 #else
-      GetShellEscapedString(unescaped, &path);
+      GetShellEscapedString(temp_path, &*out);
 #endif
-      result.push_back(std::move(path));
     } else {
-      result.push_back(std::move(unescaped));
+      input->AppendPathDecanonicalized(&*out);
     }
+    ++out;
   }
   return result;
 }
