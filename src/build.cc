@@ -238,9 +238,11 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
 
 bool Plan::NodeFinished(Node* node, string* err) {
   // See if we we want any edges from this node.
-  for (vector<Edge*>::const_iterator oe = node->out_edges().begin();
-       oe != node->out_edges().end(); ++oe) {
-    map<Edge*, Want>::iterator want_e = want_.find(*oe);
+  // Iterate by index: EdgeMaybeReady() may finish an edge whose outputs
+  // include a dyndep file, and loading it can add new out-edges to |node|,
+  // reallocating node->out_edges() and invalidating any iterators into it.
+  for (size_t i = 0; i < node->out_edges().size(); ++i) {
+    map<Edge*, Want>::iterator want_e = want_.find(node->out_edges()[i]);
     if (want_e == want_.end())
       continue;
 

@@ -4637,3 +4637,32 @@ build d: cp c
   EXPECT_EQ("b: X", content);
   EXPECT_EQ("", err);
 }
+
+TEST_F(BuildTest, DyndepLoadedWhileIteratingOutEdges) {
+  // 'dd' is clean but not ready (order-only dep on dirty 'n'), so it is
+  // loaded only once 'n' finishes, from inside Plan::NodeFinished(n). The
+  // dyndep file adds 'n' as an input of 'out', growing n->out_edges_ while
+  // NodeFinished is iterating it.
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+"rule touch\n"
+"  command = touch $out\n"
+"rule cp\n"
+"  command = cp $in $out\n"
+"build n: touch\n"
+"build dd: cp dd-in || n\n"
+"build out: touch || dd\n"
+"  dyndep = dd\n"
+));
+  fs_.Create("dd-in", "");
+  fs_.Tick();
+  fs_.Create("dd",
+"ninja_dyndep_version = 1\n"
+"build out: dyndep | n\n"
+);
+
+  string err;
+  EXPECT_TRUE(builder_.AddTarget("out", &err));
+  EXPECT_EQ("", err);
+  EXPECT_EQ(builder_.Build(&err), ExitSuccess);
+  EXPECT_EQ("", err);
+}
