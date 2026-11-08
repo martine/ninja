@@ -288,6 +288,8 @@ void Usage(const BuildConfig& config) {
 "  -k N     keep going until N jobs fail (0 means infinity) [default=1]\n"
 "  -l N     do not start new jobs if the load average is greater than N\n"
 "  -n       dry run (don't run commands but act like they succeeded)\n"
+"  -q, --question\n"
+"             check whether targets are up to date without building\n"
 "\n"
 "  -d MODE  enable debugging (use '-d list' to list modes)\n"
 "  -t TOOL  run a subtool (use '-t list' to list subtools)\n"
@@ -315,7 +317,8 @@ int GuessParallelism() {
 }
 
 /// Rebuild the build manifest, if necessary.
-/// Returns true if the manifest was rebuilt.
+/// Returns true if the manifest was rebuilt, or would be rebuilt in question
+/// mode.
 bool NinjaMain::RebuildManifest(const char* input_file, string* err,
                                 Status* status) {
   string path = input_file;
@@ -336,6 +339,9 @@ bool NinjaMain::RebuildManifest(const char* input_file, string* err,
 
   if (builder.AlreadyUpToDate())
     return false;  // Not an error, but we didn't rebuild.
+
+  if (config_.question)
+    return true;
 
   if (builder.Build(err) != ExitSuccess)
     return false;
@@ -1781,6 +1787,9 @@ ExitStatus NinjaMain::RunBuild(int argc, char** argv, Status* status) {
   // Make sure restat rules do not see stale timestamps.
   disk_interface_.AllowStatCache(false);
 
+  if (config_.question)
+    return builder.AlreadyUpToDate() ? ExitSuccess : ExitFailure;
+
   if (builder.AlreadyUpToDate()) {
     if (config_.verbosity != BuildConfig::NO_STATUS_UPDATE) {
       status->Info("no work to do.");
@@ -1850,6 +1859,7 @@ int ReadFlags(int* argc, char*** argv,
     OPT_QUIET = 2,
     OPT_STATUS = 3,
     OPT_JOBSERVER_POOL = 4,
+    OPT_QUESTION = 5,
   };
   const option kLongOptions[] = {
     { "help", no_argument, NULL, 'h' },
@@ -1858,12 +1868,13 @@ int ReadFlags(int* argc, char*** argv,
     { "quiet", no_argument, NULL, OPT_QUIET },
     { "status", required_argument, NULL, OPT_STATUS },
     { "jobserver-pool", no_argument, NULL, OPT_JOBSERVER_POOL },
+    { "question", no_argument, NULL, OPT_QUESTION },
     { NULL, 0, NULL, 0 }
   };
 
   int opt;
   while (!options->tool &&
-         (opt = getopt_long(*argc, *argv, "d:f:j:k:l:nt:vw:C:h", kLongOptions,
+         (opt = getopt_long(*argc, *argv, "d:f:j:k:l:nqt:vw:C:h", kLongOptions,
                             NULL)) != -1) {
     switch (opt) {
       case 'd':
@@ -1909,6 +1920,11 @@ int ReadFlags(int* argc, char*** argv,
         break;
       }
       case 'n':
+        config->dry_run = true;
+        break;
+      case 'q':
+      case OPT_QUESTION:
+        config->question = true;
         config->dry_run = true;
         break;
       case 't':
@@ -2028,8 +2044,10 @@ NORETURN void real_main(int argc, char** argv) {
     if (ninja.RebuildManifest(options.input_file, &err, status)) {
       // In dry_run mode the regeneration will succeed without changing the
       // manifest forever. Better to return immediately.
+      if (config.question)
+        exit(ExitFailure);
       if (config.dry_run)
-        exit(0);
+        exit(ExitSuccess);
       // Start the build over with the new manifest.
       continue;
     } else if (!err.empty()) {

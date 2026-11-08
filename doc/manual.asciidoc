@@ -180,6 +180,12 @@ the command line, if one exists. For example, if you specify target as
 `foo.c^` then `foo.o` will get built (assuming you have those targets
 in your build files).
 
+To check whether the requested targets are up to date without running any
+commands, use `ninja -q` or `ninja --question`. Ninja exits successfully when
+there is no work to do and returns a non-zero status when a target would be
+built or an error is found. Question mode does not print progress or command
+output.
+
 `ninja -h` prints help output.  Many of Ninja's flags intentionally
 match those of Make; e.g `ninja -C build -j 20` changes into the
 `build` directory and runs 20 build commands in parallel.  (Note that

@@ -193,6 +193,8 @@ struct BuildConfig {
   };
   Verbosity verbosity = NORMAL;
   bool dry_run = false;
+  /// Check whether the build is up to date without running commands.
+  bool question = false;
   /// Number of concurrent jobs, auto-detected or specified explicitly.
   int parallelism = 1;
   /// True if -j<count> was used on the command line.

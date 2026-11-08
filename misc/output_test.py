@@ -722,6 +722,47 @@ build foo: sleep
                     proc.wait()
                     self.assertEqual(proc.returncode, 130, msg=f"For signal {signum}")
 
+class QuestionMode(unittest.TestCase):
+    def test_question_mode(self) -> None:
+        command = subprocess.list2cmdline(
+            [sys.executable, '-c', "open('$out', 'w').close()"])
+        plan = f'''\
+            rule write
+              command = {command}
+
+            build out: write input
+            '''
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, 'build.ninja'), 'w') as f:
+                f.write(dedent(plan))
+            with open(os.path.join(d, 'input'), 'w'):
+                pass
+
+            build = subprocess.run(
+                [NINJA_PATH], cwd=d, env=default_env,
+                capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+
+            output_mtime = os.stat(os.path.join(d, 'out')).st_mtime_ns
+            clean = subprocess.run(
+                [NINJA_PATH, '--question'], cwd=d, env=default_env,
+                capture_output=True, text=True)
+            self.assertEqual(clean.returncode, 0)
+            self.assertEqual(clean.stdout, '')
+            self.assertEqual(clean.stderr, '')
+
+            input_mtime = output_mtime + 1_000_000_000
+            os.utime(os.path.join(d, 'input'),
+                     ns=(input_mtime, input_mtime))
+            dirty = subprocess.run(
+                [NINJA_PATH, '-q'], cwd=d, env=default_env,
+                capture_output=True, text=True)
+            self.assertEqual(dirty.returncode, 1)
+            self.assertEqual(dirty.stdout, '')
+            self.assertEqual(dirty.stderr, '')
+            self.assertEqual(os.stat(os.path.join(d, 'out')).st_mtime_ns,
+                             output_mtime)
+
 
 if __name__ == '__main__':
     unittest.main()
