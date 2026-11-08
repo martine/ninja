@@ -46,6 +46,8 @@ static constexpr size_t kMaxRecordSize = (1 << 19) - 1;
 
 DepsLog::~DepsLog() {
   Close();
+  for (Deps* deps : deps_)
+    delete deps;
 }
 
 bool DepsLog::OpenForWrite(const string& path, string* err) {
