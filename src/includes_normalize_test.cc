@@ -33,7 +33,7 @@ string GetCurDir() {
   return parts[parts.size() - 1].AsString();
 }
 
-string NormalizeAndCheckNoError(const string& input) {
+string NormalizeAndCheckNoError(StringPiece input) {
   string result, err;
   IncludesNormalize normalizer(".");
   EXPECT_TRUE(normalizer.Normalize(input, &result, &err));
@@ -41,8 +41,8 @@ string NormalizeAndCheckNoError(const string& input) {
   return result;
 }
 
-string NormalizeRelativeAndCheckNoError(const string& input,
-                                        const string& relative_to) {
+string NormalizeRelativeAndCheckNoError(StringPiece input,
+                                        StringPiece relative_to) {
   string result, err;
   IncludesNormalize normalizer(relative_to);
   EXPECT_TRUE(normalizer.Normalize(input, &result, &err));
@@ -57,14 +57,17 @@ TEST(IncludesNormalize, Simple) {
   EXPECT_EQ("b", NormalizeAndCheckNoError("a\\../b"));
   EXPECT_EQ("a/b", NormalizeAndCheckNoError("a\\.\\b"));
   EXPECT_EQ("a/b", NormalizeAndCheckNoError("a\\./b"));
+  EXPECT_EQ("../b", NormalizeAndCheckNoError("a/../../b"));
 }
 
 TEST(IncludesNormalize, WithRelative) {
   string err;
   string currentdir = GetCurDir();
+
   EXPECT_EQ("c", NormalizeRelativeAndCheckNoError("a/b/c", "a/b"));
-  EXPECT_EQ("a",
-            NormalizeAndCheckNoError(IncludesNormalize::AbsPath("a", &err)));
+  string absA = "a";
+  IncludesNormalize::MakePathAbsolute(&absA, &err);
+  EXPECT_EQ("a", NormalizeAndCheckNoError(absA));
   EXPECT_EQ("", err);
   EXPECT_EQ(string("../") + currentdir + string("/a"),
             NormalizeRelativeAndCheckNoError("a", "../b"));
@@ -97,6 +100,9 @@ TEST(IncludesNormalize, DifferentDrive) {
   EXPECT_EQ("P:/wee/stuff.h",
             NormalizeRelativeAndCheckNoError("P:/vs08\\../wee\\stuff.h",
                                              "D:\\stuff/things"));
+  EXPECT_EQ(".", NormalizeAndCheckNoError("P:\\.."));
+  EXPECT_EQ("a", NormalizeAndCheckNoError("P:\\../a"));
+  EXPECT_EQ("P:/a", NormalizeAndCheckNoError("P:\\a//.//b/.."));
 }
 
 TEST(IncludesNormalize, LongInvalidPath) {
