@@ -489,7 +489,18 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   if (!edge_deps_loaded) {
     // only try to load the deps log if no rebuild is necessary
     // if an rebuild is necessary the deps log is outdated for this target
+    bool deps_checked = false;
     if (!dirty) {
+      const Node* most_recent_input_previous = most_recent_input;
+      if (!RecomputeLoggedDepsDirty(edge, most_recent_input, &deps_checked,
+                                    stack, validation_nodes, err))
+        return false;
+      if (deps_checked && most_recent_input_previous != most_recent_input)
+        dirty = recomputeOutputsDirty.depfile(most_recent_input);
+    }
+    if (deps_checked) {
+      edge->deps_loaded_ = false;
+    } else if (!dirty) {
       // Load discovered deps.
       std::optional<EdgeInputsRange> new_deps = dep_loader_.LoadDeps(edge, err);
       if (!new_deps) {
@@ -540,6 +551,46 @@ bool DependencyScan::RecomputeNodeDirty(Node* node, std::vector<Node*>* stack,
   assert(stack->back() == node);
   stack->pop_back();
 
+  return true;
+}
+
+bool DependencyScan::RecomputeLoggedDepsDirty(
+    Edge* edge, Node*& most_recent_input, bool* checked,
+    std::vector<Node*>* stack, std::vector<Node*>* validation_nodes,
+    std::string* err) {
+  DepsLog* deps_log = dep_loader_.deps_log();
+  if (!deps_log || edge->GetBinding("deps").empty())
+    return true;
+
+  Node* output = edge->outputs_[0];
+  DepsLog::Deps* deps = deps_log->GetDeps(output);
+  if (!deps)
+    return true;
+  if (!output->StatIfNecessary(disk_interface_, err))
+    return false;
+  if (output->mtime() > deps->mtime)
+    return true;
+
+  for (int i = 0; i < deps->node_count; ++i) {
+    Node* node = deps->nodes[i];
+    if (!node->in_edge() && node->status_known())
+      continue;
+    if (!RecomputeNodeDirty(node, stack, validation_nodes, err))
+      return false;
+  }
+
+  Node* most_recent = most_recent_input;
+  for (int i = 0; i < deps->node_count; ++i) {
+    Node* node = deps->nodes[i];
+    Edge* in_edge = node->in_edge();
+    if (node->dirty() || (in_edge && !in_edge->outputs_ready_))
+      return true;
+    if (!most_recent || node->mtime() > most_recent->mtime())
+      most_recent = node;
+  }
+
+  most_recent_input = most_recent;
+  *checked = true;
   return true;
 }
 
