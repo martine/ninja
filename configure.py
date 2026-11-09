@@ -700,6 +700,7 @@ if platform.is_aix() and '-maix64' not in ldflags:
 for name in ['build_log_perftest',
              'canon_perftest',
              'elide_middle_perftest',
+             'escape_perftest',
              'depfile_parser_perftest',
              'hash_collision_bench',
              'manifest_parser_perftest',

@@ -363,6 +363,7 @@ for perftest in (
     "clparser_perftest",
     "depfile_parser_perftest",
     "elide_middle_perftest",
+    "escape_perftest",
     "hash_collision_bench",
     "manifest_parser_perftest",
 ):

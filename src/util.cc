@@ -40,6 +40,9 @@
 #endif
 
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <string_view>
 #include <vector>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
@@ -318,7 +321,101 @@ void CanonicalizePath(char* path, size_t* len, uint64_t* slash_bits) {
 #endif
 }
 
-static inline bool IsKnownShellSafeCharacter(char ch) {
+namespace {
+
+// Constants for the highest bit and lowest bit of each 8-byte word.
+const std::uint64_t msb = 0x80'80'80'80'80'80'80'80ull;
+const std::uint64_t lsb = 0x01'01'01'01'01'01'01'01ull;
+
+/// Return a word where the high bit of each byte is 1 iff the corresponding
+/// byte in \a w is equal to \a c, and every other bit is 0.
+/// \pre each byte of `w` is < 0x80
+/// \pre `c` < 0x80
+inline std::uint64_t Equal7(std::uint64_t w, unsigned char c) {
+  assert((w & msb) == 0);
+  assert(c < 0x80);
+  return ~((w ^ (lsb * c)) + ~msb) & msb;
+}
+
+/// Return a word where the high bit of each byte is 1 iff the corresponding
+/// byte in \a w is >= \a c, and every other bit is 0.
+/// \pre each byte of `w` is < 0x80
+/// \pre `c` <= 0x80
+inline std::uint64_t AtLeast7(std::uint64_t w, unsigned char c) {
+  assert((w & msb) == 0);
+  assert(c <= 0x80);
+  return (w + lsb * static_cast<unsigned char>(0x80 - c)) & msb;
+}
+
+/// Return a word where the high bit of each byte is 1 iff the corresponding
+/// byte in \a w is in [\a lo, \a hi], and every other bit is 0.
+/// \pre each byte of `w` is < 0x80
+/// \pre `lo` <= 0x80 and `hi` < 0x80
+inline std::uint64_t Between7(std::uint64_t w, unsigned char lo,
+                              unsigned char hi) {
+  assert((w & msb) == 0);
+  assert(lo <= 0x80);
+  assert(hi < 0x80);
+  return AtLeast7(w, lo) & ~AtLeast7(w, static_cast<unsigned char>(hi + 1));
+}
+
+/// Return a word where the high bit of each byte is 1 iff the corresponding
+/// byte in \a w is not one of [A-Za-z0-9_+./-], and every other bit is 0.
+inline std::uint64_t ShellUnsafeBytes(std::uint64_t w) {
+  const std::uint64_t low7 = w & ~msb;
+  // Setting the 'a' - 'A' bit maps 'A'-'Z' onto 'a'-'z' and nothing else onto
+  // 'a'-'z'.
+  const std::uint64_t folded = low7 | (lsb * ('a' - 'A'));
+  const std::uint64_t letters = Between7(folded, 'a', 'z');
+  // "+,-./0123456789" without ','.
+  const std::uint64_t digits_punct =
+      Between7(low7, '+', '9') & ~Equal7(low7, ',');
+  const std::uint64_t safe =
+      (letters | digits_punct | Equal7(low7, '_')) & ~w;
+  return ~safe & msb;
+}
+
+/// Return a word where the high bit of each byte is 1 iff the corresponding
+/// byte in \a w is ' ' or '"', and every other bit is 0.
+inline std::uint64_t Win32UnsafeBytes(std::uint64_t w) {
+  const std::uint64_t low7 = w & ~msb;
+  return (Equal7(low7, ' ') | Equal7(low7, '"')) & ~w;
+}
+
+/// Return true iff \a unsafe sets a high bit for any byte of \a input,
+/// checking 8 bytes at a time.
+/// \pre `unsafe` classifies each byte of a word on its own, as the functions
+/// above do, so the order of bytes in a word doesn't matter
+/// \pre `input.size() >= 8`
+template <typename UnsafeBytesFn>
+inline bool AnyUnsafeByte(std::string_view input, UnsafeBytesFn unsafe) {
+  const char* p = input.data();
+  const std::size_t n = input.size();
+  assert(n >= 8);
+  std::uint64_t w;
+  std::uint64_t any = 0;
+  // Don't return early when a word has an unsafe byte. Most inputs need no
+  // escaping and have to be checked in full anyway, and the extra branch for
+  // each word slows down that expected case.
+  for (std::size_t i = 0; i + 8 <= n; i += 8) {
+    std::memcpy(&w, p + i, 8);
+    any |= unsafe(w);
+  }
+  // The last 8 bytes, which may overlap with bytes already checked.
+  std::memcpy(&w, p + n - 8, 8);
+  return (any | unsafe(w)) != 0;
+}
+
+/// Return the number of consecutive backslashes ending just before \a p.
+/// \pre `begin <= p`
+inline std::size_t BackslashesBefore(const char* begin, const char* p) {
+  const char* b = p;
+  while (b != begin && b[-1] == '\\')
+    --b;
+  return static_cast<std::size_t>(p - b);
+}
+
+inline bool IsKnownShellSafeCharacter(char ch) {
   if ('A' <= ch && ch <= 'Z') return true;
   if ('a' <= ch && ch <= 'z') return true;
   if ('0' <= ch && ch <= '9') return true;
@@ -335,7 +432,7 @@ static inline bool IsKnownShellSafeCharacter(char ch) {
   }
 }
 
-static inline bool IsKnownWin32SafeCharacter(char ch) {
+inline bool IsKnownWin32SafeCharacter(char ch) {
   switch (ch) {
     case ' ':
     case '"':
@@ -345,21 +442,38 @@ static inline bool IsKnownWin32SafeCharacter(char ch) {
   }
 }
 
-static inline bool StringNeedsShellEscaping(const string& input) {
+}  // namespace
+
+bool StringNeedsShellEscapingFallback(std::string_view input) {
   for (size_t i = 0; i < input.size(); ++i) {
     if (!IsKnownShellSafeCharacter(input[i])) return true;
   }
   return false;
 }
 
-static inline bool StringNeedsWin32Escaping(const string& input) {
+bool StringNeedsWin32EscapingFallback(std::string_view input) {
   for (size_t i = 0; i < input.size(); ++i) {
     if (!IsKnownWin32SafeCharacter(input[i])) return true;
   }
   return false;
 }
 
-void GetShellEscapedString(const string& input, string* result) {
+// Inputs shorter than a word are rare, and checking them one character at a
+// time is faster than copying them into a padded word.
+
+static inline bool StringNeedsShellEscaping(std::string_view input) {
+  if (input.size() < 8)
+    return StringNeedsShellEscapingFallback(input);
+  return AnyUnsafeByte(input, ShellUnsafeBytes);
+}
+
+static inline bool StringNeedsWin32Escaping(std::string_view input) {
+  if (input.size() < 8)
+    return StringNeedsWin32EscapingFallback(input);
+  return AnyUnsafeByte(input, Win32UnsafeBytes);
+}
+
+void GetShellEscapedString(std::string_view input, string* result) {
   assert(result);
 
   if (!StringNeedsShellEscaping(input)) {
@@ -372,21 +486,23 @@ void GetShellEscapedString(const string& input, string* result) {
 
   result->push_back(kQuote);
 
-  string::const_iterator span_begin = input.begin();
-  for (string::const_iterator it = input.begin(), end = input.end(); it != end;
+  // Quotes are rare, so jump between them rather than checking every byte.
+  const char* span_begin = input.data();
+  const char* const end = input.data() + input.size();
+  for (const char* it = span_begin;
+       (it = static_cast<const char*>(std::memchr(it, kQuote, end - it))) !=
+       nullptr;
        ++it) {
-    if (*it == kQuote) {
-      result->append(span_begin, it);
-      result->append(kEscapeSequence);
-      span_begin = it;
-    }
+    result->append(span_begin, it);
+    result->append(kEscapeSequence);
+    span_begin = it;
   }
-  result->append(span_begin, input.end());
+  result->append(span_begin, end);
   result->push_back(kQuote);
 }
 
 
-void GetWin32EscapedString(const string& input, string* result) {
+void GetWin32EscapedString(std::string_view input, string* result) {
   assert(result);
   if (!StringNeedsWin32Escaping(input)) {
     result->append(input);
@@ -397,27 +513,23 @@ void GetWin32EscapedString(const string& input, string* result) {
   const char kBackslash = '\\';
 
   result->push_back(kQuote);
-  size_t consecutive_backslash_count = 0;
-  string::const_iterator span_begin = input.begin();
-  for (string::const_iterator it = input.begin(), end = input.end(); it != end;
+
+  // Backslashes only need escaping when they come right before a quote, or at
+  // the end of the input before our closing quote, so jump between quotes
+  // rather than checking every byte.
+  const char* const begin = input.data();
+  const char* const end = begin + input.size();
+  const char* span_begin = begin;
+  for (const char* it = begin;
+       (it = static_cast<const char*>(std::memchr(it, kQuote, end - it))) !=
+       nullptr;
        ++it) {
-    switch (*it) {
-      case kBackslash:
-        ++consecutive_backslash_count;
-        break;
-      case kQuote:
-        result->append(span_begin, it);
-        result->append(consecutive_backslash_count + 1, kBackslash);
-        span_begin = it;
-        consecutive_backslash_count = 0;
-        break;
-      default:
-        consecutive_backslash_count = 0;
-        break;
-    }
+    result->append(span_begin, it);
+    result->append(BackslashesBefore(begin, it) + 1, kBackslash);
+    span_begin = it;
   }
-  result->append(span_begin, input.end());
-  result->append(consecutive_backslash_count, kBackslash);
+  result->append(span_begin, end);
+  result->append(BackslashesBefore(begin, end), kBackslash);
   result->push_back(kQuote);
 }
 
