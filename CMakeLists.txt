@@ -136,6 +136,7 @@ add_library(libninja OBJECT
   src/edit_distance.cc
   src/elide_middle.cc
   src/eval_env.cc
+  src/eval_string.cc
   src/explanations.cc
   src/graph.cc
   src/graphviz.cc
@@ -280,6 +281,7 @@ if(BUILD_TESTING)
     src/dyndep_parser_test.cc
     src/edit_distance_test.cc
     src/elide_middle_test.cc
+    src/eval_string_test.cc
     src/explanations_test.cc
     src/graph_test.cc
     src/jobserver_test.cc
