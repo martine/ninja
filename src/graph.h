@@ -427,6 +427,10 @@ struct DependencyScan {
                                  std::vector<Node*>* stack,
                                  std::vector<Node*>* validation_nodes,
                                  std::string* err);
+  bool RecomputeLoggedDepsDirty(Edge* edge, Node*& most_recent_input,
+                                bool* checked, std::vector<Node*>* stack,
+                                std::vector<Node*>* validation_nodes,
+                                std::string* err);
   bool VerifyDAG(Node* node, std::vector<Node*>* stack, std::string* err);
 
   void RecordExplanation(const Node* node, const char* fmt, ...);

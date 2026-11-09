@@ -3189,6 +3189,154 @@ TEST_F(BuildWithDepsLogTest, DepFileOKDepsLog) {
   }
 }
 
+TEST_F(BuildWithDepsLogTest, CleanEdgeDepsNotAddedToGraph) {
+  string err;
+  const char* manifest =
+      "rule cc\n  command = cc $in\n  depfile = $out.d\n  deps = gcc\n"
+      "build out.o: cc foo.c\n";
+
+  fs_.Create("foo.c", "");
+  fs_.Create("foo.h", "");
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
+    builder.command_runner_.reset(&command_runner_);
+    SafeRelease protect(&builder);
+    EXPECT_TRUE(builder.AddTarget("out.o", &err));
+    ASSERT_EQ("", err);
+    fs_.Create("out.o.d", "out.o: foo.h\n");
+    EXPECT_EQ(builder.Build(&err), ExitSuccess);
+    EXPECT_EQ("", err);
+
+    deps_log.Close();
+  }
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.Load(deps_log_file_.path(), &state, &err));
+    ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
+    builder.command_runner_.reset(&command_runner_);
+    SafeRelease protect(&builder);
+    EXPECT_TRUE(builder.AddTarget("out.o", &err));
+    ASSERT_EQ("", err);
+    EXPECT_TRUE(builder.AlreadyUpToDate());
+
+    Edge* edge = state.GetNode("out.o", 0)->in_edge();
+    ASSERT_EQ(1u, edge->inputs_.size());
+    EXPECT_EQ("foo.c", edge->inputs_[0]->path());
+    EXPECT_TRUE(state.GetNode("foo.h", 0)->out_edges().empty());
+
+    deps_log.Close();
+  }
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    fs_.Tick();
+    fs_.Create("foo.h", "");
+
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.Load(deps_log_file_.path(), &state, &err));
+    ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
+    builder.command_runner_.reset(&command_runner_);
+    SafeRelease protect(&builder);
+    command_runner_.commands_ran_.clear();
+    EXPECT_TRUE(builder.AddTarget("out.o", &err));
+    ASSERT_EQ("", err);
+    EXPECT_FALSE(builder.AlreadyUpToDate());
+    fs_.Create("out.o.d", "out.o: foo.h\n");
+    EXPECT_EQ(builder.Build(&err), ExitSuccess);
+    EXPECT_EQ("", err);
+    ASSERT_EQ(1u, command_runner_.commands_ran_.size());
+    EXPECT_EQ("cc foo.c", command_runner_.commands_ran_[0]);
+
+    deps_log.Close();
+  }
+}
+
+TEST_F(BuildWithDepsLogTest, DirtyGeneratedDepAddedToGraph) {
+  string err;
+  const char* manifest =
+      "rule cc\n  command = cc $in\n  depfile = $out.d\n  deps = gcc\n"
+      "rule touch\n  command = touch $out\n"
+      "build gen.h: touch gen.in\n"
+      "build out.o: cc foo.c\n";
+
+  fs_.Create("foo.c", "");
+  fs_.Create("gen.in", "");
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
+    builder.command_runner_.reset(&command_runner_);
+    SafeRelease protect(&builder);
+    EXPECT_TRUE(builder.AddTarget("gen.h", &err));
+    EXPECT_TRUE(builder.AddTarget("out.o", &err));
+    ASSERT_EQ("", err);
+    fs_.Create("out.o.d", "out.o: gen.h\n");
+    EXPECT_EQ(builder.Build(&err), ExitSuccess);
+    EXPECT_EQ("", err);
+
+    deps_log.Close();
+  }
+
+  {
+    State state;
+    ASSERT_NO_FATAL_FAILURE(AssertParse(&state, manifest));
+
+    fs_.Tick();
+    fs_.Create("gen.in", "");
+
+    DepsLog deps_log;
+    ASSERT_TRUE(deps_log.Load(deps_log_file_.path(), &state, &err));
+    ASSERT_TRUE(deps_log.OpenForWrite(deps_log_file_.path(), &err));
+    ASSERT_EQ("", err);
+
+    Builder builder(&state, config_, NULL, &deps_log, &fs_, &status_, 0);
+    builder.command_runner_.reset(&command_runner_);
+    SafeRelease protect(&builder);
+    command_runner_.commands_ran_.clear();
+    EXPECT_TRUE(builder.AddTarget("out.o", &err));
+    ASSERT_EQ("", err);
+
+    Edge* edge = state.GetNode("out.o", 0)->in_edge();
+    ASSERT_EQ(2u, edge->inputs_.size());
+    EXPECT_EQ("gen.h", edge->inputs_[1]->path());
+
+    fs_.Create("out.o.d", "out.o: gen.h\n");
+    EXPECT_EQ(builder.Build(&err), ExitSuccess);
+    EXPECT_EQ("", err);
+    ASSERT_EQ(2u, command_runner_.commands_ran_.size());
+    EXPECT_EQ("touch gen.h", command_runner_.commands_ran_[0]);
+    EXPECT_EQ("cc foo.c", command_runner_.commands_ran_[1]);
+
+    deps_log.Close();
+  }
+}
+
 TEST_F(BuildWithDepsLogTest, DiscoveredDepDuringBuildChanged) {
   string err;
   const char* manifest =
