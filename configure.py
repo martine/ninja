@@ -20,10 +20,13 @@ Projects that use ninja themselves should either write a similar script
 or use a meta-build system that supports Ninja output."""
 
 from optparse import OptionParser
+from io import StringIO
 import os
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Optional, Union, Dict, List, Any, TYPE_CHECKING
 
 sourcedir = os.path.dirname(os.path.realpath(__file__))
@@ -247,7 +250,8 @@ else:
     host = platform
 
 BUILD_FILENAME = 'build.ninja'
-ninja_writer = ninja_syntax.Writer(open(BUILD_FILENAME, 'w'))
+manifest = StringIO()
+ninja_writer = ninja_syntax.Writer(manifest)
 n: Union[ninja_syntax.Writer, Bootstrap] = ninja_writer
 
 if options.bootstrap:
@@ -781,6 +785,15 @@ if host.is_linux():
 
 n.build('all', 'phony', all_targets)
 
+manifest_path = os.path.realpath(BUILD_FILENAME)
+with tempfile.TemporaryDirectory(prefix='.ninja-',
+                                 dir=os.path.dirname(manifest_path)) as tempdir:
+    temporary_manifest = os.path.join(tempdir, BUILD_FILENAME)
+    with open(temporary_manifest, 'w') as output:
+        output.write(manifest.getvalue())
+    if os.path.exists(BUILD_FILENAME):
+        shutil.copymode(BUILD_FILENAME, temporary_manifest)
+    os.replace(temporary_manifest, manifest_path)
 n.close()  # type: ignore # Item "Bootstrap" of "Writer | Bootstrap" has no attribute "close"
 print('wrote %s.' % BUILD_FILENAME)
 
