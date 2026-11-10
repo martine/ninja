@@ -165,6 +165,21 @@ class TestDefault(unittest.TestCase):
         self.assertEqual('default a$ b c$:d\n', self.out.getvalue())
 
 
+class TestRule(unittest.TestCase):
+    def setUp(self) -> None:
+        self.out = StringIO()
+        self.n = ninja_syntax.Writer(self.out)
+
+    def test_empty_rspfile_content(self) -> None:
+        self.n.rule('cat', 'cat $rspfile', rspfile='cat.rsp',
+                    rspfile_content='')
+        expected = ('rule cat\n'
+                    '  command = cat $rspfile\n'
+                    '  rspfile = cat.rsp\n'
+                    '  rspfile_content = ' + '\n')
+        self.assertEqual(expected, self.out.getvalue())
+
+
 class TestBuild(unittest.TestCase):
     def setUp(self) -> None:
         self.out = StringIO()

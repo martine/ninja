@@ -89,9 +89,9 @@ class Writer(object):
             self.variable('pool', pool, indent=1)
         if restat:
             self.variable('restat', '1', indent=1)
-        if rspfile:
+        if rspfile is not None:
             self.variable('rspfile', rspfile, indent=1)
-        if rspfile_content:
+        if rspfile_content is not None:
             self.variable('rspfile_content', rspfile_content, indent=1)
         if deps:
             self.variable('deps', deps, indent=1)

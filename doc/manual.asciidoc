@@ -1114,11 +1114,11 @@ keys.
   needed to be built.  This may cause the output's reverse
   dependencies to be removed from the list of pending build actions.
 
-`rspfile`, `rspfile_content`:: if present (both), Ninja will use a
+`rspfile`, `rspfile_content`:: if both are present, Ninja will use a
   response file for the given command, i.e. write the selected string
   (`rspfile_content`) to the given file (`rspfile`) before calling the
   command and delete the file after successful execution of the
-  command.
+  command. The response-file content may be empty.
 +
 This is particularly useful on Windows, where the maximum length of
 a command line is limited and response files must be used instead.

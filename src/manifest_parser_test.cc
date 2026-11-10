@@ -590,6 +590,18 @@ TEST_F(ParserTest, Errors) {
     State local_state;
     ManifestParser parser(&local_state, NULL);
     string err;
+    EXPECT_TRUE(parser.ParseTest("rule cat\n"
+                                "  command = cat\n"
+                                "  rspfile = cat.rsp\n"
+                                "  rspfile_content =\n",
+                                &err));
+    EXPECT_TRUE(err.empty());
+  }
+
+  {
+    State local_state;
+    ManifestParser parser(&local_state, NULL);
+    string err;
     EXPECT_FALSE(parser.ParseTest("rule cat\n"
                                   "  command = ${fafsd\n"
                                   "foo = bar\n",

@@ -169,8 +169,10 @@ bool ManifestParser::ParseRule(string* err) {
     }
   }
 
-  if (rule->bindings_["rspfile"].empty() !=
-      rule->bindings_["rspfile_content"].empty()) {
+  const EvalString* rspfile = rule->GetBinding("rspfile");
+  const EvalString* rspfile_content = rule->GetBinding("rspfile_content");
+  if ((rspfile != nullptr && !rspfile->empty()) !=
+      (rspfile_content != nullptr)) {
     return lexer_.Error("rspfile and rspfile_content need to be "
                         "both specified", err);
   }
