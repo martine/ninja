@@ -20,6 +20,7 @@
 
 #include "build_log.h"
 #include "build_result.h"
+#include "debug_flags.h"
 #include "deps_log.h"
 #include "exit_status.h"
 #include "graph.h"
@@ -2035,10 +2036,131 @@ TEST_F(BuildWithLogTest, GeneratedPlainDepfileMtime) {
 }
 
 struct BuildDryRun : public BuildWithLogTest {
-  BuildDryRun() {
-    config_.dry_run = true;
-  }
+  BuildDryRun() : old_keep_rsp_(g_keep_rsp) { config_.dry_run = true; }
+
+  ~BuildDryRun() { g_keep_rsp = old_keep_rsp_; }
+
+  bool old_keep_rsp_;
 };
+
+TEST_F(BuildDryRun, DoesNotCreateDirectories) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule true\n"
+                                      "  command = true\n"
+                                      "  depfile = deps/out.d\n"
+                                      "build output/subdir/out: true\n"));
+
+  std::string err;
+  ASSERT_TRUE(builder_.AddTarget("output/subdir/out", &err));
+  ASSERT_EQ(ExitSuccess, builder_.Build(&err));
+  EXPECT_EQ("", err);
+  EXPECT_TRUE(fs_.directories_made_.empty());
+  EXPECT_EQ(1u, command_runner_.commands_ran_.size());
+}
+
+TEST_F(BuildDryRun, DoesNotWriteOrRemoveResponseFiles) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule true\n"
+                                      "  command = true\n"
+                                      "  rspfile = $out.rsp\n"
+                                      "  rspfile_content = new arguments\n"
+                                      "build first: true\n"
+                                      "build second: true\n"));
+  fs_.Create("first.rsp", "preserve me");
+  fs_.files_created_.clear();
+
+  std::string err;
+  ASSERT_TRUE(builder_.AddTarget("first", &err));
+  ASSERT_TRUE(builder_.AddTarget("second", &err));
+  ASSERT_EQ(ExitSuccess, builder_.Build(&err));
+  EXPECT_EQ("", err);
+  EXPECT_TRUE(fs_.files_created_.empty());
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  std::string contents;
+  ASSERT_EQ(DiskInterface::Okay, fs_.ReadFile("first.rsp", &contents, &err));
+  EXPECT_EQ("preserve me", contents);
+  EXPECT_EQ(0u, fs_.files_.count("second.rsp"));
+  EXPECT_EQ(2u, command_runner_.commands_ran_.size());
+}
+
+TEST_F(BuildDryRun, KeepResponseFilesCreatesOnlyTheirDirectories) {
+  g_keep_rsp = true;
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule true\n"
+                                      "  command = true\n"
+                                      "  depfile = deps/out.d\n"
+                                      "  rspfile = responses/out.rsp\n"
+                                      "  rspfile_content = arguments\n"
+                                      "build output/out: true\n"));
+  fs_.files_created_.clear();
+
+  std::string err;
+  ASSERT_TRUE(builder_.AddTarget("output/out", &err));
+  ASSERT_EQ(ExitSuccess, builder_.Build(&err));
+  EXPECT_EQ("", err);
+  ASSERT_EQ(1u, fs_.directories_made_.size());
+  EXPECT_EQ("responses", fs_.directories_made_[0]);
+  ASSERT_EQ(1u, fs_.files_created_.size());
+  EXPECT_EQ(1u, fs_.files_created_.count("responses/out.rsp"));
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  EXPECT_EQ("arguments", fs_.files_["responses/out.rsp"].contents);
+  EXPECT_EQ(1u, command_runner_.commands_ran_.size());
+}
+
+TEST_F(BuildDryRun, DoesNotConsumeDepfiles) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule true\n"
+                                      "  command = true\n"
+                                      "  depfile = $out.d\n"
+                                      "build gccout: true in1\n"
+                                      "  deps = gcc\n"
+                                      "build zeroout: true in1\n"
+                                      "  deps = zero\n"));
+  fs_.Create("gccout.d", "gccout: in1\n");
+  fs_.Create("zeroout.d", std::string("in1\0", 4));
+
+  std::string err;
+  ASSERT_TRUE(builder_.AddTarget("gccout", &err));
+  ASSERT_TRUE(builder_.AddTarget("zeroout", &err));
+  ASSERT_EQ(ExitSuccess, builder_.Build(&err));
+  EXPECT_EQ("", err);
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  EXPECT_EQ("gccout: in1\n", fs_.files_["gccout.d"].contents);
+  EXPECT_EQ(std::string("in1\0", 4), fs_.files_["zeroout.d"].contents);
+}
+
+TEST_F(BuildDryRun, CleanupPreservesExistingLockFile) {
+  fs_.Create(".ninja_lock", "existing lock");
+  builder_.Cleanup();
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  EXPECT_EQ(1u, fs_.files_.count(".ninja_lock"));
+
+  // Cleanup may also run before a command runner has been created.
+  builder_.command_runner_.release();
+  builder_.Cleanup();
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  EXPECT_EQ(1u, fs_.files_.count(".ninja_lock"));
+}
+
+TEST_F(BuildDryRun, CleanupPreservesOutputsAndDepfiles) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+                                      "rule true\n"
+                                      "  command = true\n"
+                                      "  depfile = out.d\n"
+                                      "build out: true in1\n"));
+  fs_.Create("out", "original output");
+  fs_.Create("out.d", "out: in1\n");
+
+  std::string err;
+  ASSERT_TRUE(builder_.AddTarget("out", &err));
+  ASSERT_TRUE(builder_.StartEdge(state_.LookupNode("out")->in_edge(), &err));
+  ASSERT_EQ(1u, command_runner_.GetActiveEdges().size());
+  builder_.Cleanup();
+  EXPECT_TRUE(command_runner_.GetActiveEdges().empty());
+  EXPECT_TRUE(fs_.files_removed_.empty());
+  EXPECT_EQ("original output", fs_.files_["out"].contents);
+  EXPECT_EQ("out: in1\n", fs_.files_["out.d"].contents);
+}
 
 TEST_F(BuildDryRun, AllCommandsShown) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,

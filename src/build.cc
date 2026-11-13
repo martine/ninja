@@ -635,6 +635,9 @@ void Builder::Cleanup() {
     vector<Edge*> active_edges = command_runner_->GetActiveEdges();
     command_runner_->Abort();
 
+    if (config_.dry_run)
+      return;
+
     for (vector<Edge*>::iterator e = active_edges.begin();
          e != active_edges.end(); ++e) {
       string depfile = (*e)->GetUnescapedDepfile();
@@ -660,7 +663,7 @@ void Builder::Cleanup() {
   }
 
   string err;
-  if (disk_interface_->Stat(lock_file_path_, &err) > 0)
+  if (!config_.dry_run && disk_interface_->Stat(lock_file_path_, &err) > 0)
     disk_interface_->RemoveFile(lock_file_path_);
 }
 
@@ -865,7 +868,7 @@ bool Builder::StartEdge(Edge* edge, string* err) {
   // XXX: this will block; do we care?
   for (vector<Node*>::iterator o = edge->outputs_.begin();
        o != edge->outputs_.end(); ++o) {
-    if (!disk_interface_->MakeDirs((*o)->path()))
+    if (!config_.dry_run && !disk_interface_->MakeDirs((*o)->path()))
       return false;
     if (build_start == -1) {
       disk_interface_->WriteFile(lock_file_path_, ".", false);
@@ -885,13 +888,17 @@ bool Builder::StartEdge(Edge* edge, string* err) {
   // Create depfile directory if needed.
   // XXX: this may also block; do we care?
   std::string depfile = edge->GetUnescapedDepfile();
-  if (!depfile.empty() && !disk_interface_->MakeDirs(depfile))
+  if (!config_.dry_run && !depfile.empty() &&
+      !disk_interface_->MakeDirs(depfile))
     return false;
 
   // Create response file, if needed
   // XXX: this may also block; do we care?
   string rspfile = edge->GetUnescapedRspfile();
-  if (!rspfile.empty()) {
+  if (!rspfile.empty() && (!config_.dry_run || g_keep_rsp)) {
+    // Explicitly keeping response files is useful even during a dry run.
+    if (config_.dry_run && !disk_interface_->MakeDirs(rspfile))
+      return false;
     string content = edge->GetBinding("rspfile_content");
     if (!disk_interface_->WriteFile(rspfile, content, true))
       return false;
@@ -920,7 +927,7 @@ bool Builder::FinishCommand(BuildResult::CommandCompleted& result,
   vector<Node*> deps_nodes;
   string deps_type = edge->GetBinding("deps");
   const string deps_prefix = edge->GetBinding("msvc_deps_prefix");
-  if (!deps_type.empty()) {
+  if (!deps_type.empty() && !config_.dry_run) {
     string extract_err;
     if (!ExtractDeps(result, deps_type, deps_prefix, &deps_nodes,
                      &extract_err) &&
@@ -987,7 +994,7 @@ bool Builder::FinishCommand(BuildResult::CommandCompleted& result,
 
   // Delete any left over response file.
   string rspfile = edge->GetUnescapedRspfile();
-  if (!rspfile.empty() && !g_keep_rsp)
+  if (!config_.dry_run && !rspfile.empty() && !g_keep_rsp)
     disk_interface_->RemoveFile(rspfile);
 
   if (scan_.build_log()) {

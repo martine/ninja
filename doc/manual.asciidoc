@@ -186,6 +186,12 @@ match those of Make; e.g `ninja -C build -j 20` changes into the
 Ninja defaults to running commands in parallel anyway, so typically
 you don't need to pass `-j`.)
 
+Use `ninja -n` to show the commands without running them or creating their
+output and depfile directories. Response files are also left untouched,
+unless `-d keeprsp` is specified. With `ninja -n -d keeprsp`, Ninja writes
+the response files and creates their parent directories, without running
+the commands.
+
 
 GNU Jobserver support
 ~~~~~~~~~~~~~~~~~~~~~
