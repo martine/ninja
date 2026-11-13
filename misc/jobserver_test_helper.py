@@ -31,9 +31,14 @@ def main():
     parser.add_argument("output_file", type=Path, help="output file name.")
     args = parser.parse_args()
 
-    now_time_ns = time.time_ns()
+    # Compare task spans without being affected by system clock adjustments.
+    clock_ns = time.monotonic_ns
+    # Before Python 3.10, macOS monotonic clocks are process-local.
+    if sys.platform == "darwin" and sys.version_info < (3, 10):
+        clock_ns = time.time_ns
+    now_time_ns = clock_ns()
     time.sleep(int(args.duration_ms) / 1000.0)
-    args.output_file.write_text(f"{now_time_ns}\n{time.time_ns()}\n")
+    args.output_file.write_text(f"{now_time_ns}\n{clock_ns()}\n")
 
     return 0
 
