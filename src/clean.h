@@ -93,6 +93,9 @@ struct Cleaner {
   void PrintHeader();
   void PrintFooter();
   void DoCleanRule(const Rule* rule);
+  /// Find the rule named @a rule_name, including rules that are only defined
+  /// in a subninja scope.
+  const Rule* LookupRule(const char* rule_name);
   void Reset();
 
   /// Load dependencies from dyndep bindings.
