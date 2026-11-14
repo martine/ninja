@@ -594,6 +594,23 @@ out3<TAB>in3
           '''out1,in1\0out2,in1\0out2,in2\0'''
         )
 
+    def test_tool_clean_rule_in_subninja(self) -> None:
+        plan = '''
+rule touch
+  command = touch $out
+build a: touch
+subninja sub.ninja
+'''
+        with BuildDir(plan) as b:
+            with open(os.path.join(b.path, 'sub.ninja'), 'w') as f:
+                f.write('rule subtouch\n'
+                        '  command = touch $out\n'
+                        'build b: subtouch\n')
+            b.run('a b', pipe=True)
+            self.assertEqual(b.run('-t clean -r subtouch', pipe=True),
+                             'Cleaning... 1 files.\n')
+            self.assertTrue(os.path.exists(os.path.join(b.path, 'a')))
+            self.assertFalse(os.path.exists(os.path.join(b.path, 'b')))
 
     def test_explain_output(self):
         b = BuildDir('''\

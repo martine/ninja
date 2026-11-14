@@ -255,7 +255,7 @@ int Cleaner::CleanRule(const char* rule) {
   assert(rule);
 
   Reset();
-  const Rule* r = state_->bindings_.LookupRule(rule);
+  const Rule* r = LookupRule(rule);
   if (r) {
     CleanRule(r);
   } else {
@@ -273,7 +273,7 @@ int Cleaner::CleanRules(int rule_count, char* rules[]) {
   LoadDyndeps();
   for (int i = 0; i < rule_count; ++i) {
     const char* rule_name = rules[i];
-    const Rule* rule = state_->bindings_.LookupRule(rule_name);
+    const Rule* rule = LookupRule(rule_name);
     if (rule) {
       if (IsVerbose())
         printf("Rule %s\n", rule_name);
@@ -285,6 +285,18 @@ int Cleaner::CleanRules(int rule_count, char* rules[]) {
   }
   PrintFooter();
   return status_;
+}
+
+const Rule* Cleaner::LookupRule(const char* rule_name) {
+  if (const Rule* rule = state_->bindings_.LookupRule(rule_name))
+    return rule;
+  // Rules defined in a subninja are not visible in the top-level scope, so
+  // look for an edge that uses a rule with that name.
+  for (const Edge* edge : state_->edges_) {
+    if (edge->rule().name() == rule_name)
+      return &edge->rule();
+  }
+  return nullptr;
 }
 
 void Cleaner::Reset() {

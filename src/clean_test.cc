@@ -271,6 +271,31 @@ TEST_F(CleanTest, CleanRuleGenerator) {
   EXPECT_EQ(2u, fs_.files_removed_.size());
 }
 
+TEST_F(CleanTest, CleanRuleInSubninja) {
+  // Rules defined in a subninja are not in the top-level scope.
+  fs_.Create("sub.ninja",
+             "rule subcat\n"
+             "  command = cat $in > $out\n"
+             "build out2: subcat in2\n");
+  ManifestParser parser(&state_, &fs_);
+  std::string err;
+  ASSERT_TRUE(
+      parser.ParseTest("build out1: cat in1\n"
+                       "subninja sub.ninja\n",
+                       &err));
+  ASSERT_EQ("", err);
+  fs_.Create("out1", "");
+  fs_.Create("out2", "");
+
+  Cleaner cleaner(&state_, config_, &fs_);
+  char subcat[] = "subcat";
+  char* rules[] = { subcat };
+  EXPECT_EQ(0, cleaner.CleanRules(1, rules));
+  EXPECT_EQ(1, cleaner.cleaned_files_count());
+  EXPECT_LT(0, fs_.Stat("out1", &err));
+  EXPECT_EQ(0, fs_.Stat("out2", &err));
+}
+
 TEST_F(CleanTest, CleanDepFile) {
   ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
 "rule cc\n"
