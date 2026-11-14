@@ -1013,6 +1013,25 @@ TEST_F(BuildTest, MissingInput) {
             err);
 }
 
+TEST_F(BuildTest, MissingOrderOnlyInputThroughPhony) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+"build root: phony || missing\n"));
+  std::string err;
+  EXPECT_FALSE(builder_.AddTarget("root", &err));
+  EXPECT_EQ("'missing', needed by 'root', missing and no known rule to make it",
+            err);
+}
+
+TEST_F(BuildTest, MissingOrderOnlyInputThroughCleanTarget) {
+  ASSERT_NO_FATAL_FAILURE(AssertParse(&state_,
+"build root: cat in1 || missing\n"));
+  fs_.Create("root", "");
+  std::string err;
+  EXPECT_FALSE(builder_.AddTarget("root", &err));
+  EXPECT_EQ("'missing', needed by 'root', missing and no known rule to make it",
+            err);
+}
+
 TEST_F(BuildTest, MissingTarget) {
   // Target is not referenced by build file.
   string err;

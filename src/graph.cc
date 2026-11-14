@@ -374,6 +374,9 @@ bool DependencyScan::RecomputeEdgesInputsDirty(
     if (Edge* in_edge = (*i)->in_edge()) {
       if (!in_edge->outputs_ready_)
         edge->outputs_ready_ = false;
+    } else if ((*i)->dirty() && !(*i)->generated_by_dep_loader()) {
+      // A missing manifest input is not ready, even if it is order-only.
+      edge->outputs_ready_ = false;
     }
 
     if (!edge->is_order_only(i - edge->inputs_.cbegin())) {
